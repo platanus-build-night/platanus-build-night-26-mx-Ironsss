@@ -66,7 +66,7 @@ function landmarksToWorld(landmarks, scale = 2.5) {
   const points = landmarks.map(l => new THREE.Vector3(
     (l.x - 0.5) * scale,
     -(l.y - 0.5) * scale,
-    -(l.z || 0) * scale * 0.8
+    -(l.z || 0) * scale * 0.5
   ));
 
   const MID_SHOULDER = new THREE.Vector3()
@@ -123,6 +123,7 @@ export default function MannequinViewer({
   repMetrics,
   currentTime,
   getRepScore,
+  currentRepData,
 }) {
   const containerRef = useRef(null);
   const stateRef = useRef(null); // holds all Three.js objects
@@ -449,6 +450,26 @@ export default function MannequinViewer({
             </button>
           ))}
         </div>
+
+        {/* Rep findings overlay */}
+        {currentRepData && (
+          <div className="absolute bottom-3 left-3 right-3 max-h-[40%] overflow-y-auto"
+            style={{ pointerEvents: 'none' }}>
+            <div className="space-y-1">
+              {currentRepData.findings.slice(0, 3).map((f, i) => {
+                const bg = f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623';
+                const icon = f.type === 'good' ? '\u2713' : f.type === 'warn' ? '\u2717' : '!';
+                return (
+                  <div key={i} className="rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', borderLeft: `3px solid ${bg}` }}>
+                    <span className="text-[10px] font-bold flex-shrink-0 mt-0.5" style={{ color: bg }}>{icon}</span>
+                    <p className="text-[10px] text-white/85 leading-tight">{f.text}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3 px-1">

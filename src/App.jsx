@@ -844,6 +844,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
             repMetrics={repMetrics}
             currentTime={videoTime}
             getRepScore={getRepScore}
+            currentRepData={currentRepData}
           />
 
           {/* Shared playback controls for mannequin */}
@@ -901,6 +902,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
             onPlay={playVideo}
             onPause={pauseVideo}
             onSeek={(t) => { if (feedbackRef.current) feedbackRef.current.currentTime = t; }}
+            currentRepData={currentRepData}
           />
         </div>
       )}

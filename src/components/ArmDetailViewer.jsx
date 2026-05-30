@@ -231,7 +231,7 @@ function lmToWorld(l, scale = 3.0) {
   return new THREE.Vector3(
     (l.x - 0.5) * scale,
     -(l.y - 0.5) * scale,
-    -(l.z || 0) * scale * 0.8
+    -(l.z || 0) * scale * 0.5
   );
 }
 
@@ -278,6 +278,7 @@ function createColorScaleTexture() {
 export default function ArmDetailViewer({
   frameLandmarks, activeSide = 'right', repMetrics,
   currentTime, getRepScore, isPaused, onPlay, onPause, onSeek,
+  currentRepData,
 }) {
   const containerRef = useRef(null);
   const stateRef = useRef(null);
@@ -589,7 +590,7 @@ export default function ArmDetailViewer({
           ))}
         </div>
 
-        <div className="absolute bottom-3 left-3 space-y-1">
+        <div className="absolute bottom-3 left-3 space-y-1" style={{ maxWidth: '45%' }}>
           {[
             { label: 'Deltoides', desc: 'Estabilización del hombro' },
             { label: 'Bíceps braquial', desc: 'Flexión principal' },
@@ -602,6 +603,23 @@ export default function ArmDetailViewer({
             </div>
           ))}
         </div>
+
+        {/* Rep findings overlay */}
+        {currentRepData && (
+          <div className="absolute bottom-3 right-3 space-y-1" style={{ maxWidth: '50%', pointerEvents: 'none' }}>
+            {currentRepData.findings.slice(0, 3).map((f, i) => {
+              const bg = f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623';
+              const icon = f.type === 'good' ? '\u2713' : f.type === 'warn' ? '\u2717' : '!';
+              return (
+                <div key={i} className="rounded-lg px-2.5 py-1.5 flex items-start gap-1.5"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', borderLeft: `3px solid ${bg}` }}>
+                  <span className="text-[10px] font-bold flex-shrink-0 mt-0.5" style={{ color: bg }}>{icon}</span>
+                  <p className="text-[10px] text-white/85 leading-tight">{f.text}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Playback controls */}
