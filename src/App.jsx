@@ -588,7 +588,7 @@ function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
   const numReps = repMetrics.length;
 
   // Ideal timing constants (seconds)
-  const REST_BEFORE = 1.0;     // rest before first rep
+  const REST_BEFORE = 0.15;    // brief rest before first rep
   const CONCENTRIC = 1.2;      // lifting phase
   const HOLD = 0.6;            // isometric hold at top
   const ECCENTRIC = 1.7;       // lowering phase (slower = controlled)
@@ -670,16 +670,20 @@ function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
     const angleRad = (angle * Math.PI) / 180;
 
     // Apply to BOTH arms symmetrically
-    for (const [shI, elI, wrI, sign] of [[11, 13, 15, -1], [12, 14, 16, 1]]) {
+    // theta = angle from the "straight down" direction (upper arm direction in MediaPipe y-down coords)
+    // anatomical 165° (extended) → theta = 180-165 = 15° from down → forearm hangs nearly straight
+    // anatomical 35° (flexed)   → theta = 180-35  = 145° from down → forearm curls up
+    const theta = (180 - angle) * Math.PI / 180;
+    for (const [shI, elI, wrI, sign] of [[11, 13, 15, 1], [12, 14, 16, -1]]) {
       const sh = lm[shI];
       // Upper arm hangs straight down
       lm[elI] = { ...lm[elI], x: sh.x, y: sh.y + avgUpper, z: sh.z || 0 };
-      // Forearm at ideal angle
+      // Forearm at ideal angle from vertical
       const el = lm[elI];
       lm[wrI] = {
         ...lm[wrI],
-        x: el.x + sign * Math.sin(angleRad) * avgFore,
-        y: el.y + Math.cos(angleRad) * avgFore,
+        x: el.x + sign * Math.sin(theta) * avgFore,
+        y: el.y + Math.cos(theta) * avgFore,
         z: el.z || 0,
       };
     }
@@ -696,62 +700,68 @@ function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
 function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore }) {
   const [idealTime, setIdealTime] = useState(0);
   const [idealPlaying, setIdealPlaying] = useState(false);
-  const [idealCurrentRep, setIdealCurrentRep] = useState(null);
   const idealAnimRef = useRef(null);
   const idealLastTRef = useRef(null);
-  const idealPausedAtRepRef = useRef(null);
+  const idealTimeRef = useRef(0); // imperative time ref for MannequinViewer render loop
 
   // Use ideal-specific rep timings (attached by generateIdealLandmarks)
   const idealRepMetrics = idealLandmarks._idealRepMetrics || repMetrics;
   const idealDuration = idealLandmarks[idealLandmarks.length - 1]?.timestamp || 1;
 
-  // Playback loop
+  // Current rep for highlight
+  const idealCurrentRep = idealRepMetrics.find(r => idealTime >= r.startTime && idealTime <= r.endTime) || null;
+
+  // Simple playback loop — updates both ref (for immediate 3D sync) and state (for UI)
   useEffect(() => {
     if (!idealPlaying) {
       idealLastTRef.current = null;
       return;
     }
+    let frameCount = 0;
     const tick = (now) => {
       if (idealLastTRef.current == null) idealLastTRef.current = now;
       const dt = (now - idealLastTRef.current) / 1000;
       idealLastTRef.current = now;
 
-      setIdealTime(prev => {
-        const next = prev + dt;
-        if (next >= idealDuration) {
-          setIdealPlaying(false);
-          return idealDuration;
-        }
+      const next = idealTimeRef.current + dt;
+      if (next >= idealDuration) {
+        idealTimeRef.current = idealDuration;
+        setIdealPlaying(false);
+        setIdealTime(idealDuration);
+        return;
+      }
+      idealTimeRef.current = next;
 
-        // Check if we entered a new rep — auto-pause at rep start
-        const rep = idealRepMetrics.find(r => next >= r.startTime && next <= r.endTime);
-        if (rep && rep.repNumber !== idealPausedAtRepRef.current) {
-          idealPausedAtRepRef.current = rep.repNumber;
-          setIdealCurrentRep(rep);
-          setIdealPlaying(false);
-          return rep.startTime + 0.01;
-        }
-        if (rep) setIdealCurrentRep(rep);
-        else setIdealCurrentRep(null);
-
-        return next;
-      });
+      // Update React state every 3 frames for UI (slider, rep buttons)
+      frameCount++;
+      if (frameCount % 3 === 0) {
+        setIdealTime(next);
+      }
 
       idealAnimRef.current = requestAnimationFrame(tick);
     };
     idealAnimRef.current = requestAnimationFrame(tick);
     return () => { if (idealAnimRef.current) cancelAnimationFrame(idealAnimRef.current); };
-  }, [idealPlaying, idealRepMetrics, idealDuration]);
+  }, [idealPlaying, idealDuration]);
 
-  const startIdeal = () => {
-    setIdealPlaying(true);
+  const togglePlay = () => {
+    if (idealPlaying) {
+      setIdealPlaying(false);
+      setIdealTime(idealTimeRef.current);
+    } else {
+      // If at the end, restart
+      if (idealTimeRef.current >= idealDuration - 0.1) {
+        idealTimeRef.current = 0;
+        setIdealTime(0);
+      }
+      setIdealPlaying(true);
+    }
   };
 
   const resetIdeal = () => {
     setIdealPlaying(false);
+    idealTimeRef.current = 0;
     setIdealTime(0);
-    setIdealCurrentRep(null);
-    idealPausedAtRepRef.current = null;
   };
 
   return (
@@ -763,10 +773,11 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
         currentTime={idealTime}
         getRepScore={() => 3}
         idealMode
+        timeRef={idealTimeRef}
       />
       <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
         <div className="flex items-center gap-2">
-          <button onClick={() => idealPlaying ? setIdealPlaying(false) : startIdeal()}
+          <button onClick={togglePlay}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-white hover:opacity-80 transition-colors text-xs"
             style={{ backgroundColor: '#16C79A' }}>
             {idealPlaying ? '\u23F8' : '\u25B6'}
@@ -774,10 +785,10 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
           <button onClick={resetIdeal}
             className="w-8 h-8 flex items-center justify-center rounded-lg bg-ink/10 text-ink/60 hover:bg-ink/20 transition-colors text-xs"
             title="Reiniciar">
-            \u21BB
+            {'\u21BB'}
           </button>
           <input type="range" min={0} max={idealDuration} step={0.01} value={idealTime}
-            onChange={e => { setIdealTime(+e.target.value); idealPausedAtRepRef.current = null; }}
+            onChange={e => { const v = +e.target.value; idealTimeRef.current = v; setIdealTime(v); }}
             className="flex-1" style={{ accentColor: '#16C79A' }} />
           <span className="font-mono text-[9px] text-ink/40 w-12 text-right">{idealTime.toFixed(1)}s</span>
         </div>
@@ -787,22 +798,12 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
             const isActive = idealCurrentRep?.repNumber === rep.repNumber;
             return (
               <button key={rep.repNumber}
-                onClick={() => { setIdealTime(rep.startTime + 0.01); idealPausedAtRepRef.current = null; setIdealPlaying(false); }}
+                onClick={() => { idealTimeRef.current = rep.startTime + 0.01; setIdealTime(rep.startTime + 0.01); setIdealPlaying(false); }}
                 className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
                 style={{ backgroundColor: '#16C79A' }}>{rep.repNumber}</button>
             );
           })}
         </div>
-        {!idealPlaying && idealCurrentRep && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs text-ink/50">Pausado en Rep {idealCurrentRep.repNumber}</span>
-            <button onClick={startIdeal}
-              className="text-xs font-semibold px-3 py-1 rounded-full text-white"
-              style={{ backgroundColor: '#16C79A' }}>
-              Continuar
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -820,10 +821,6 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
   const [barWidths, setBarWidths] = useState({ left: 0, right: 0 });
   const [videoTime, setVideoTime] = useState(0);
 
-  const idealLandmarks = useMemo(
-    () => generateIdealLandmarks(frameLandmarks, repMetrics, activeSide),
-    [frameLandmarks, repMetrics, activeSide]
-  );
 
   const playVideo = useCallback(() => {
     feedbackRef.current?.play();
@@ -1084,59 +1081,48 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
         </div>
       )}
 
-      {/* Digital Twin — Real vs Ideal side by side */}
+      {/* Digital Twin */}
       {frameLandmarks?.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center gap-3 mb-3">
-            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Real vs Ideal</h3>
-            <span className="text-xs text-ink/30">Compara tu ejecucion con la forma perfecta</span>
+            <h3 className="font-display text-lg font-bold text-ink">Digital Twin</h3>
+            <span className="text-xs text-ink/30">Replica 3D sincronizada con tu video</span>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Real twin */}
-            <div>
-              <MannequinViewer
-                frameLandmarks={frameLandmarks}
-                activeSide={activeSide}
-                repMetrics={repMetrics}
-                currentTime={videoTime}
-                getRepScore={getRepScore}
-                currentRepData={currentRepData}
-              />
-              <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
-                <div className="flex items-center gap-2">
-                  <button onClick={() => isPaused ? playVideo() : pauseVideo()}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-ink text-white hover:bg-ink/80 transition-colors text-xs">
-                    {isPaused ? '\u25B6' : '\u23F8'}
-                  </button>
-                  <input type="range" min={0} max={frameLandmarks[frameLandmarks.length - 1]?.timestamp || 1}
-                    step={0.01} value={videoTime}
-                    onChange={e => { if (feedbackRef.current) feedbackRef.current.currentTime = +e.target.value; }}
-                    className="flex-1 accent-accent" />
-                  <span className="font-mono text-[9px] text-ink/40 w-12 text-right">{videoTime.toFixed(1)}s</span>
-                </div>
-                <div className="flex items-center gap-1 mt-1.5">
-                  <span className="text-[9px] text-ink/30 mr-1">Reps:</span>
-                  {repMetrics.map(rep => {
-                    const score = getRepScore ? getRepScore(rep.repNumber) : 2;
-                    const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
-                    const isActive = currentRepData?.rep.repNumber === rep.repNumber;
-                    return (
-                      <button key={rep.repNumber} onClick={() => jumpToRep(rep)}
-                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
-                        style={{ backgroundColor: color }}>{rep.repNumber}</button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Ideal twin */}
-            <IdealTwinSection
-              idealLandmarks={idealLandmarks}
+          <div>
+            <MannequinViewer
+              frameLandmarks={frameLandmarks}
               activeSide={activeSide}
               repMetrics={repMetrics}
+              currentTime={videoTime}
               getRepScore={getRepScore}
+              currentRepData={currentRepData}
             />
+            <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
+              <div className="flex items-center gap-2">
+                <button onClick={() => isPaused ? playVideo() : pauseVideo()}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-ink text-white hover:bg-ink/80 transition-colors text-xs">
+                  {isPaused ? '\u25B6' : '\u23F8'}
+                </button>
+                <input type="range" min={0} max={frameLandmarks[frameLandmarks.length - 1]?.timestamp || 1}
+                  step={0.01} value={videoTime}
+                  onChange={e => { if (feedbackRef.current) feedbackRef.current.currentTime = +e.target.value; }}
+                  className="flex-1 accent-accent" />
+                <span className="font-mono text-[9px] text-ink/40 w-12 text-right">{videoTime.toFixed(1)}s</span>
+              </div>
+              <div className="flex items-center gap-1 mt-1.5">
+                <span className="text-[9px] text-ink/30 mr-1">Reps:</span>
+                {repMetrics.map(rep => {
+                  const score = getRepScore ? getRepScore(rep.repNumber) : 2;
+                  const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+                  const isActive = currentRepData?.rep.repNumber === rep.repNumber;
+                  return (
+                    <button key={rep.repNumber} onClick={() => jumpToRep(rep)}
+                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
+                      style={{ backgroundColor: color }}>{rep.repNumber}</button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -2292,7 +2278,7 @@ function MethodologyTab({ repMetrics, summary }) {
         <div className="space-y-2 font-mono text-sm">
           {[
             { path: 'src/main.jsx', desc: 'Entry point — monta React en el DOM' },
-            { path: 'src/App.jsx', desc: 'App principal: UploadView, ProcessingView, DashboardView, FeedbackView, TimeseriesTab, RepsTab, MethodologyTab, HistoryView, IdealTwinSection' },
+            { path: 'src/App.jsx', desc: 'App principal: UploadView, ProcessingView, DashboardView, FeedbackView, TimeseriesTab, RepsTab, MethodologyTab, HistoryView' },
             { path: 'src/analysis/engine.js', desc: 'Motor de analisis: processVideo(), deteccion de reps, calculo de metricas (ROM, TUT, C:E, trunk, fatigue, hold)' },
             { path: 'src/components/MannequinViewer.jsx', desc: 'Digital Twin 3D cuerpo completo — LatheGeometry organica, materiales PBR, sombras, iluminacion de estudio' },
             { path: 'src/components/ArmDetailViewer.jsx', desc: 'Visor FEA del brazo — BufferGeometry con vertex colors, mapa de esfuerzo jet colormap, wireframe overlay' },

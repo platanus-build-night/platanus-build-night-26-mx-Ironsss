@@ -133,9 +133,12 @@ export default function MannequinViewer({
   getRepScore,
   currentRepData,
   idealMode = false,
+  timeRef,           // optional ref for imperative time updates (bypasses React re-renders)
 }) {
   const containerRef = useRef(null);
   const stateRef = useRef(null); // holds all Three.js objects
+  const applyPoseRef = useRef(null); // stores latest applyPose for render loop access
+  const timeRefLastIdx = useRef(-1); // tracks last applied frame index from timeRef
 
   const activeArm = activeSide === 'left' ? 'leftArm' : 'rightArm';
 
@@ -222,6 +225,9 @@ export default function MannequinViewer({
       }
     }
   }, [frameLandmarks, activeSide, getRepAtTime, getRepScore, idealMode]);
+
+  // Keep applyPoseRef in sync
+  applyPoseRef.current = applyPose;
 
   // ── Initialize Three.js scene ──
   useEffect(() => {
@@ -344,10 +350,26 @@ export default function MannequinViewer({
       },
     };
 
-    // Render loop
+    // Render loop — also drives timeRef-based pose updates for ideal mannequin
     let rafId;
+    const fLandmarks = frameLandmarks; // capture for closure
     const animate = () => {
       rafId = requestAnimationFrame(animate);
+
+      // If timeRef is provided, sync pose imperatively (bypasses React re-renders)
+      if (timeRef?.current != null && fLandmarks?.length && applyPoseRef.current) {
+        const t = timeRef.current;
+        let bestIdx = 0, bestDist = Infinity;
+        for (let i = 0; i < fLandmarks.length; i++) {
+          const d = Math.abs(fLandmarks[i].timestamp - t);
+          if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        if (bestIdx !== timeRefLastIdx.current) {
+          timeRefLastIdx.current = bestIdx;
+          applyPoseRef.current(bestIdx);
+        }
+      }
+
       controls.update();
       renderer.render(scene, camera);
     };
@@ -428,7 +450,7 @@ export default function MannequinViewer({
         <div
           ref={containerRef}
           className="w-full bg-ink rounded-2xl overflow-hidden"
-          style={{ height: '380px', touchAction: 'none' }}
+          style={{ height: '480px', touchAction: 'none' }}
         />
 
         <div className="absolute top-3 left-3 flex items-center gap-2">
