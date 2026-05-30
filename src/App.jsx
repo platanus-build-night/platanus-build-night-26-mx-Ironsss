@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { processVideo, assessMetric, saveSession, getHistory } from './analysis/engine';
 import { DEMO_HISTORY, getProgressionData } from './data/demoHistory';
+import MannequinViewer from './components/MannequinViewer';
 
 // ════════════════════════════════════════════════
 // LATEX COMPONENT
@@ -856,10 +857,23 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
   const tabs = [
     { id: 'overview', label: 'Resumen' },
     { id: 'feedback', label: 'Feedback' },
+    { id: 'twin', label: 'Digital Twin' },
     { id: 'reps', label: 'Por Rep' },
     { id: 'timeseries', label: 'Gráficas' },
     { id: 'methodology', label: 'Metodología' },
   ];
+
+  // Score calculator for each rep (used by MannequinViewer)
+  const getRepScore = useCallback((repNumber) => {
+    const rep = repMetrics.find(r => r.repNumber === repNumber);
+    if (!rep) return 2;
+    const romAssess = assessMetric('rom', rep.rom);
+    const trunkAssess = assessMetric('trunkLean', rep.maxTrunkLean);
+    const ceAssess = assessMetric('ceRatio', rep.ceRatio);
+    return (romAssess.color === '#16C79A' ? 1 : 0)
+      + (trunkAssess.color === '#16C79A' ? 1 : 0)
+      + (ceAssess.color === '#16C79A' ? 1 : 0);
+  }, [repMetrics]);
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8 pb-24">
@@ -927,8 +941,27 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
         />
       )}
 
+      {/* Digital Twin tab: full-width */}
+      {activeTab === 'twin' && frameLandmarks?.length > 0 && (
+        <div>
+          <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
+            <h3 className="font-display text-xl font-bold mb-1">Digital Twin 3D</h3>
+            <p className="text-sm text-ink/40">
+              Maniquí 3D sincronizado con el análisis. El brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} se colorea
+              según la calidad de cada repetición. Arrastra para rotar, scroll para zoom.
+            </p>
+          </div>
+          <MannequinViewer
+            frameLandmarks={frameLandmarks}
+            activeSide={activeSide}
+            repMetrics={repMetrics}
+            getRepScore={getRepScore}
+          />
+        </div>
+      )}
+
       {/* Other tabs: two-column layout with sidebar */}
-      {activeTab !== 'feedback' && (
+      {activeTab !== 'feedback' && activeTab !== 'twin' && (
         <div className="flex gap-8 items-start">
           <div className="flex-1 min-w-0">
             {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
