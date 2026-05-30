@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ReferenceLine, ReferenceArea, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
 import { processVideo, assessMetric, saveSession, getHistory } from './analysis/engine';
 import { DEMO_HISTORY, getProgressionData } from './data/demoHistory';
@@ -376,38 +376,49 @@ function drawSkeletonOnCanvas(ctx, lm, canvasW, canvasH, activeSide, videoFit) {
   }
 }
 
-function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, duration }) {
+function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, duration, repMetrics }) {
   const originalVideoRef = useRef(null);
   const skeletonVideoRef = useRef(null);
+  const feedbackVideoRef = useRef(null);
   const canvasRef = useRef(null);
+  const feedbackCanvasRef = useRef(null);
   const animFrameRef = useRef(null);
   const syncingRef = useRef(false);
 
-  // Sync both videos together
-  const syncVideos = useCallback((source, target) => {
+  const allVideoRefs = [originalVideoRef, skeletonVideoRef, feedbackVideoRef];
+
+  // Sync all videos together
+  const syncAllFrom = useCallback((sourceRef) => {
     if (syncingRef.current) return;
     syncingRef.current = true;
-    if (target.current && source.current) {
-      if (Math.abs(target.current.currentTime - source.current.currentTime) > 0.1) {
-        target.current.currentTime = source.current.currentTime;
+    const t = sourceRef.current?.currentTime;
+    if (t != null) {
+      for (const ref of allVideoRefs) {
+        if (ref !== sourceRef && ref.current && Math.abs(ref.current.currentTime - t) > 0.1) {
+          ref.current.currentTime = t;
+        }
       }
     }
     syncingRef.current = false;
   }, []);
 
-  const handlePlay = useCallback((sourceRef, targetRef) => {
-    syncVideos(sourceRef, targetRef);
-    targetRef.current?.play();
-  }, [syncVideos]);
+  const handlePlay = useCallback((sourceRef) => {
+    syncAllFrom(sourceRef);
+    for (const ref of allVideoRefs) {
+      if (ref !== sourceRef) ref.current?.play();
+    }
+  }, [syncAllFrom]);
 
-  const handlePause = useCallback((sourceRef, targetRef) => {
-    targetRef.current?.pause();
-    syncVideos(sourceRef, targetRef);
-  }, [syncVideos]);
+  const handlePause = useCallback((sourceRef) => {
+    for (const ref of allVideoRefs) {
+      if (ref !== sourceRef) ref.current?.pause();
+    }
+    syncAllFrom(sourceRef);
+  }, [syncAllFrom]);
 
-  const handleSeek = useCallback((sourceRef, targetRef) => {
-    syncVideos(sourceRef, targetRef);
-  }, [syncVideos]);
+  const handleSeek = useCallback((sourceRef) => {
+    syncAllFrom(sourceRef);
+  }, [syncAllFrom]);
 
   // Skeleton drawing loop
   useEffect(() => {
@@ -434,11 +445,89 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
     };
   }, [frameLandmarks, activeSide]);
 
+  // Feedback annotation drawing loop
+  const feedbackAnimRef = useRef(null);
+  useEffect(() => {
+    const video = feedbackVideoRef.current;
+    const canvas = feedbackCanvasRef.current;
+    if (!video || !canvas || !repMetrics?.length || !frameLandmarks?.length) return;
+
+    const ctx = canvas.getContext('2d');
+
+    const drawFeedback = () => {
+      const rect = video.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      const videoFit = getVideoFitRect(video, canvas.width, canvas.height);
+      const t = video.currentTime;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw skeleton too
+      const closest = findClosestFrame(frameLandmarks, t);
+      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
+
+      // Find current rep
+      const currentRep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
+      if (currentRep) {
+        const { findings, score } = repInterpretation(currentRep, repMetrics);
+        const scoreColor = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+        const scoreLabel = score >= 3 ? 'Excelente' : score >= 2 ? 'Aceptable' : 'Mejorable';
+
+        // Rep badge top-left
+        const bx = videoFit.x + 10;
+        const by = videoFit.y + 10;
+
+        // Background
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, 180, 28, 8);
+        ctx.fill();
+
+        ctx.font = 'bold 14px "Plus Jakarta Sans", "Inter", sans-serif';
+        ctx.fillStyle = 'white';
+        ctx.fillText(`Rep ${currentRep.repNumber}`, bx + 10, by + 19);
+
+        ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = scoreColor;
+        ctx.fillText(scoreLabel, bx + 80, by + 19);
+
+        ctx.fillStyle = 'white';
+        ctx.font = '12px "Inter", sans-serif';
+        ctx.fillText(`${currentRep.rom}°`, bx + 148, by + 19);
+
+        // Show top findings as overlaid labels
+        const topFindings = findings.slice(0, 2);
+        topFindings.forEach((f, i) => {
+          const fy = by + 38 + i * 26;
+          const bgColor = f.type === 'good' ? 'rgba(22,199,154,0.85)' : f.type === 'warn' ? 'rgba(233,69,96,0.85)' : 'rgba(245,166,35,0.85)';
+          const text = f.text.length > 45 ? f.text.substring(0, 45) + '...' : f.text;
+
+          ctx.fillStyle = bgColor;
+          ctx.beginPath();
+          ctx.roundRect(bx, fy, Math.min(videoFit.w - 20, 260), 22, 6);
+          ctx.fill();
+
+          ctx.font = '11px "Inter", sans-serif';
+          ctx.fillStyle = 'white';
+          ctx.fillText(text, bx + 8, fy + 15);
+        });
+      }
+
+      feedbackAnimRef.current = requestAnimationFrame(drawFeedback);
+    };
+
+    drawFeedback();
+    return () => {
+      if (feedbackAnimRef.current) cancelAnimationFrame(feedbackAnimRef.current);
+    };
+  }, [frameLandmarks, activeSide, repMetrics]);
+
   return (
     <div className="space-y-3">
       {/* Original video */}
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <p className="text-[10px] font-medium text-ink/50 uppercase tracking-wide px-3 pt-2">Original</p>
+        <p className="text-xs font-semibold text-ink/50 uppercase tracking-wide px-3 pt-2">Original</p>
         <video
           ref={originalVideoRef}
           src={videoURL}
@@ -446,16 +535,16 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
           loop
           muted
           className="w-full bg-black"
-          style={{ maxHeight: '280px', objectFit: 'contain' }}
-          onPlay={() => handlePlay(originalVideoRef, skeletonVideoRef)}
-          onPause={() => handlePause(originalVideoRef, skeletonVideoRef)}
-          onSeeked={() => handleSeek(originalVideoRef, skeletonVideoRef)}
+          style={{ maxHeight: '240px', objectFit: 'contain' }}
+          onPlay={() => handlePlay(originalVideoRef)}
+          onPause={() => handlePause(originalVideoRef)}
+          onSeeked={() => handleSeek(originalVideoRef)}
         />
       </div>
 
       {/* Skeleton overlay video */}
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <p className="text-[10px] font-medium text-ink/50 uppercase tracking-wide px-3 pt-2">Análisis MediaPipe</p>
+        <p className="text-xs font-semibold text-ink/50 uppercase tracking-wide px-3 pt-2">Coordenadas MediaPipe</p>
         <div className="relative">
           <video
             ref={skeletonVideoRef}
@@ -463,10 +552,10 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
             loop
             muted
             className="w-full bg-black"
-            style={{ maxHeight: '280px', objectFit: 'contain' }}
-            onPlay={() => handlePlay(skeletonVideoRef, originalVideoRef)}
-            onPause={() => handlePause(skeletonVideoRef, originalVideoRef)}
-            onSeeked={() => handleSeek(skeletonVideoRef, originalVideoRef)}
+            style={{ maxHeight: '240px', objectFit: 'contain' }}
+            onPlay={() => handlePlay(skeletonVideoRef)}
+            onPause={() => handlePause(skeletonVideoRef)}
+            onSeeked={() => handleSeek(skeletonVideoRef)}
           />
           <canvas
             ref={canvasRef}
@@ -475,23 +564,41 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
         </div>
       </div>
 
+      {/* Feedback annotated video */}
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <p className="text-xs font-semibold text-accent uppercase tracking-wide px-3 pt-2">Feedback por Rep</p>
+        <div className="relative">
+          <video
+            ref={feedbackVideoRef}
+            src={videoURL}
+            loop
+            muted
+            className="w-full bg-black"
+            style={{ maxHeight: '240px', objectFit: 'contain' }}
+            onPlay={() => handlePlay(feedbackVideoRef)}
+            onPause={() => handlePause(feedbackVideoRef)}
+            onSeeked={() => handleSeek(feedbackVideoRef)}
+          />
+          <canvas
+            ref={feedbackCanvasRef}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          />
+        </div>
+      </div>
+
       {/* Info */}
-      <div className="bg-white rounded-2xl shadow-sm p-3">
-        <p className="text-[10px] text-ink/40">
-          Brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} detectado • {totalReps} reps • {Math.round(duration)}s
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <p className="text-xs text-ink/50">
+          Brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} • {totalReps} reps • {Math.round(duration)}s
         </p>
-        <div className="flex gap-3 mt-1.5">
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-accent" />
-            <span className="text-[9px] text-ink/40">Brazo activo</span>
+        <div className="flex gap-4 mt-2">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-accent" />
+            <span className="text-xs text-ink/40">Brazo activo</span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-glow" />
-            <span className="text-[9px] text-ink/40">Cuerpo</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="font-mono text-[9px] text-accent font-bold">90°</span>
-            <span className="text-[9px] text-ink/40">Ángulo codo</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-glow" />
+            <span className="text-xs text-ink/40">Cuerpo</span>
           </div>
         </div>
         <p className="text-[9px] text-ink/30 mt-1.5">Los videos están sincronizados — controla cualquiera de los dos.</p>
@@ -591,7 +698,7 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
           {/* Tab content */}
           {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
           {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
-          {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} />}
+          {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} repMetrics={repMetrics} />}
           {activeTab === 'methodology' && <MethodologyTab repMetrics={repMetrics} summary={summary} />}
         </div>
 
@@ -604,6 +711,7 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
               activeSide={activeSide}
               totalReps={totalReps}
               duration={duration}
+              repMetrics={repMetrics}
             />
           </div>
         )}
@@ -1018,20 +1126,55 @@ function RepsTab({ repMetrics }) {
 // ────────────────────────────────────────────
 // TIMESERIES TAB
 // ────────────────────────────────────────────
-function TimeseriesTab({ timeSeries }) {
+function TimeseriesTab({ timeSeries, repMetrics }) {
   const chartData = timeSeries.timestamps.map((t, i) => ({
     time: Math.round(t * 100) / 100,
     angle: Math.round(timeSeries.elbowAngles[i] * 10) / 10,
     trunk: Math.round(timeSeries.trunkAngles[i] * 10) / 10,
+    // Optimal zones as constant fields for ReferenceArea
+    optAngleHigh: 180,
+    optAngleLow: 0,
   }));
 
+  // Custom reference area component for optimal zones
+  const CustomAngleRefArea = ({ yAxisId }) => (
+    <>
+      {/* Green zone: 90-140° (Normal ROM zone) */}
+      <ReferenceArea y1={90} y2={140} fill="#16C79A" fillOpacity={0.08} label={{ value: 'ROM Normal', position: 'insideTopRight', fontSize: 10, fill: '#16C79A88' }} />
+      {/* Yellow zone: 60-90° */}
+      <ReferenceArea y1={60} y2={90} fill="#F5A623" fillOpacity={0.06} />
+      {/* Red zone: 0-60° */}
+      <ReferenceArea y1={0} y2={60} fill="#E94560" fillOpacity={0.05} />
+    </>
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Legend */}
+      <div className="flex gap-4 flex-wrap px-1">
+        <span className="flex items-center gap-1.5 text-xs text-ink/60">
+          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#16C79A22', border: '1px solid #16C79A44' }} />
+          Zona óptima
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-ink/60">
+          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#F5A62322', border: '1px solid #F5A62344' }} />
+          Moderado
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-ink/60">
+          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#E9456022', border: '1px solid #E9456044' }} />
+          Atención
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-ink/60">
+          <span className="w-3 h-1 rounded" style={{ backgroundColor: '#0F3460' }} />
+          Tu señal
+        </span>
+      </div>
+
       {/* Elbow angle over time */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm">
-        <h3 className="font-display text-lg mb-1">Ángulo del Codo</h3>
-        <p className="text-xs text-ink/40 mb-3">Flexión/extensión a lo largo del tiempo (señal suavizada)</p>
-        <ResponsiveContainer width="100%" height={250}>
+      <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-1">Ángulo del Codo</h3>
+        <p className="text-sm text-ink/40 mb-4">Flexión/extensión con zonas óptimas superpuestas</p>
+        <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="angleGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1040,24 +1183,39 @@ function TimeseriesTab({ timeSeries }) {
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#1A1A2E10" />
-            <XAxis dataKey="time" tick={{ fontSize: 10 }} label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} domain={[0, 180]} label={{ value: '°', position: 'insideLeft', fontSize: 10 }} />
+            {/* Optimal zones */}
+            <ReferenceArea y1={90} y2={140} fill="#16C79A" fillOpacity={0.1} />
+            <ReferenceArea y1={60} y2={90} fill="#F5A623" fillOpacity={0.08} />
+            <ReferenceArea y1={0} y2={60} fill="#E94560" fillOpacity={0.06} />
+            {/* Rep start markers */}
+            {repMetrics.map(rep => (
+              <ReferenceLine
+                key={rep.repNumber}
+                x={Math.round(rep.startTime * 100) / 100}
+                stroke="#1A1A2E30"
+                strokeDasharray="4 4"
+                label={{ value: `R${rep.repNumber}`, position: 'top', fontSize: 10, fill: '#1A1A2E66' }}
+              />
+            ))}
+            <XAxis dataKey="time" tick={{ fontSize: 11 }} label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -2, fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} domain={[0, 180]} label={{ value: '°', position: 'insideLeft', fontSize: 11 }} />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              contentStyle={{ fontSize: 13, borderRadius: 10, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
               formatter={(v) => [`${v}°`, 'Ángulo codo']}
               labelFormatter={(v) => `${v}s`}
             />
-            <ReferenceLine y={90} stroke="#F5A623" strokeDasharray="6 3" label={{ value: '90°', fontSize: 10, fill: '#F5A623' }} />
-            <Area type="monotone" dataKey="angle" stroke="#E94560" fill="url(#angleGrad)" strokeWidth={2} dot={false} />
+            <ReferenceLine y={140} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} />
+            <ReferenceLine y={90} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} />
+            <Area type="monotone" dataKey="angle" stroke="#E94560" fill="url(#angleGrad)" strokeWidth={2.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
       {/* Trunk lean over time */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm">
-        <h3 className="font-display text-lg mb-1">Compensación del Tronco</h3>
-        <p className="text-xs text-ink/40 mb-3">Inclinación lateral. Zona roja: compensación excesiva</p>
-        <ResponsiveContainer width="100%" height={180}>
+      <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-1">Compensación del Tronco</h3>
+        <p className="text-sm text-ink/40 mb-4">Inclinación lateral — la zona verde es postura correcta</p>
+        <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="trunkGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1066,16 +1224,79 @@ function TimeseriesTab({ timeSeries }) {
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#1A1A2E10" />
-            <XAxis dataKey="time" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} />
+            {/* Optimal zones for trunk */}
+            <ReferenceArea y1={0} y2={8} fill="#16C79A" fillOpacity={0.1} />
+            <ReferenceArea y1={8} y2={15} fill="#F5A623" fillOpacity={0.08} />
+            <ReferenceArea y1={15} y2={30} fill="#E94560" fillOpacity={0.06} />
+            {/* Rep markers */}
+            {repMetrics.map(rep => (
+              <ReferenceLine
+                key={rep.repNumber}
+                x={Math.round(rep.startTime * 100) / 100}
+                stroke="#1A1A2E20"
+                strokeDasharray="4 4"
+              />
+            ))}
+            <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} domain={[0, 'auto']} />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              contentStyle={{ fontSize: 13, borderRadius: 10, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
               formatter={(v) => [`${v}°`, 'Tronco']}
             />
-            <ReferenceLine y={10} stroke="#E94560" strokeDasharray="4 2" label={{ value: 'Límite', fontSize: 9, fill: '#E94560' }} />
-            <Area type="monotone" dataKey="trunk" stroke="#0F3460" fill="url(#trunkGrad)" strokeWidth={2} dot={false} />
+            <ReferenceLine y={8} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} label={{ value: '8° ideal', fontSize: 10, fill: '#16C79A' }} />
+            <ReferenceLine y={15} stroke="#E94560" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '15° límite', fontSize: 10, fill: '#E94560' }} />
+            <Area type="monotone" dataKey="trunk" stroke="#0F3460" fill="url(#trunkGrad)" strokeWidth={2.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Per-rep comparison table */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-1">Comparativa por Rep</h3>
+        <p className="text-sm text-ink/40 mb-4">Cada repetición vs rangos óptimos — rojo indica dónde corregir</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-ink/10">
+                <th className="text-left py-2 px-2 text-ink/50 font-medium">Rep</th>
+                <th className="text-center py-2 px-2 text-ink/50 font-medium">ROM</th>
+                <th className="text-center py-2 px-2 text-ink/50 font-medium">TUT</th>
+                <th className="text-center py-2 px-2 text-ink/50 font-medium">C:E</th>
+                <th className="text-center py-2 px-2 text-ink/50 font-medium">Tronco</th>
+                <th className="text-center py-2 px-2 text-ink/50 font-medium">Hold</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repMetrics.map(rep => {
+                const romColor = rep.rom >= 90 ? '#16C79A' : rep.rom >= 60 ? '#F5A623' : '#E94560';
+                const tutColor = rep.tut >= 3 ? '#16C79A' : rep.tut >= 2 ? '#F5A623' : '#E94560';
+                const ceColor = rep.ceRatio >= 0.3 && rep.ceRatio <= 0.8 ? '#16C79A' : rep.ceRatio <= 1.5 ? '#F5A623' : '#E94560';
+                const trunkColor = rep.maxTrunkLean <= 8 ? '#16C79A' : rep.maxTrunkLean <= 15 ? '#F5A623' : '#E94560';
+                const holdColor = rep.holdTime >= 0.5 ? '#16C79A' : rep.holdTime >= 0.2 ? '#F5A623' : '#E94560';
+                return (
+                  <tr key={rep.repNumber} className="border-b border-ink/5">
+                    <td className="py-2.5 px-2 font-mono font-bold text-ink/70">#{rep.repNumber}</td>
+                    <td className="py-2.5 px-2 text-center">
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded-md" style={{ color: romColor, backgroundColor: romColor + '15' }}>{rep.rom}°</span>
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded-md" style={{ color: tutColor, backgroundColor: tutColor + '15' }}>{rep.tut}s</span>
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded-md" style={{ color: ceColor, backgroundColor: ceColor + '15' }}>{rep.ceRatio}</span>
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded-md" style={{ color: trunkColor, backgroundColor: trunkColor + '15' }}>{rep.maxTrunkLean}°</span>
+                    </td>
+                    <td className="py-2.5 px-2 text-center">
+                      <span className="font-mono font-semibold px-2 py-0.5 rounded-md" style={{ color: holdColor, backgroundColor: holdColor + '15' }}>{rep.holdTime}s</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
