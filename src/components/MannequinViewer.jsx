@@ -234,7 +234,7 @@ export default function MannequinViewer({
     scene.fog = new THREE.Fog(0x1a1a2e, 7, 16);
 
     const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 100);
-    camera.position.set(0, 0.2, 3.8);
+    camera.position.set(0, 0, 3.2);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(W, H);
@@ -402,10 +402,10 @@ export default function MannequinViewer({
     const st = stateRef.current;
     if (!st) return;
     const views = {
-      front: [0, 0.2, 3.8],
-      side: [3.8, 0.2, 0],
-      angle: [2.5, 1.2, 2.8],
-      back: [0, 0.2, -3.8],
+      front: [0, 0, 3.2],
+      side: [3.2, 0, 0],
+      angle: [2.2, 0.8, 2.2],
+      back: [0, 0, -3.2],
     };
     st.camera.position.set(...(views[v] || views.front));
     st.controls.target.set(0, 0, 0);
