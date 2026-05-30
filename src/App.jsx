@@ -379,46 +379,34 @@ function drawSkeletonOnCanvas(ctx, lm, canvasW, canvasH, activeSide, videoFit) {
 function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, duration, repMetrics }) {
   const originalVideoRef = useRef(null);
   const skeletonVideoRef = useRef(null);
-  const feedbackVideoRef = useRef(null);
   const canvasRef = useRef(null);
-  const feedbackCanvasRef = useRef(null);
   const animFrameRef = useRef(null);
   const syncingRef = useRef(false);
 
-  const allVideoRefs = [originalVideoRef, skeletonVideoRef, feedbackVideoRef];
-
-  // Sync all videos together
-  const syncAllFrom = useCallback((sourceRef) => {
+  const syncVideos = useCallback((sourceRef, targetRef) => {
     if (syncingRef.current) return;
     syncingRef.current = true;
-    const t = sourceRef.current?.currentTime;
-    if (t != null) {
-      for (const ref of allVideoRefs) {
-        if (ref !== sourceRef && ref.current && Math.abs(ref.current.currentTime - t) > 0.1) {
-          ref.current.currentTime = t;
-        }
+    if (targetRef.current && sourceRef.current) {
+      if (Math.abs(targetRef.current.currentTime - sourceRef.current.currentTime) > 0.1) {
+        targetRef.current.currentTime = sourceRef.current.currentTime;
       }
     }
     syncingRef.current = false;
   }, []);
 
-  const handlePlay = useCallback((sourceRef) => {
-    syncAllFrom(sourceRef);
-    for (const ref of allVideoRefs) {
-      if (ref !== sourceRef) ref.current?.play();
-    }
-  }, [syncAllFrom]);
+  const handlePlay = useCallback((sourceRef, targetRef) => {
+    syncVideos(sourceRef, targetRef);
+    targetRef.current?.play();
+  }, [syncVideos]);
 
-  const handlePause = useCallback((sourceRef) => {
-    for (const ref of allVideoRefs) {
-      if (ref !== sourceRef) ref.current?.pause();
-    }
-    syncAllFrom(sourceRef);
-  }, [syncAllFrom]);
+  const handlePause = useCallback((sourceRef, targetRef) => {
+    targetRef.current?.pause();
+    syncVideos(sourceRef, targetRef);
+  }, [syncVideos]);
 
-  const handleSeek = useCallback((sourceRef) => {
-    syncAllFrom(sourceRef);
-  }, [syncAllFrom]);
+  const handleSeek = useCallback((sourceRef, targetRef) => {
+    syncVideos(sourceRef, targetRef);
+  }, [syncVideos]);
 
   // Skeleton drawing loop
   useEffect(() => {
@@ -445,84 +433,6 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
     };
   }, [frameLandmarks, activeSide]);
 
-  // Feedback annotation drawing loop
-  const feedbackAnimRef = useRef(null);
-  useEffect(() => {
-    const video = feedbackVideoRef.current;
-    const canvas = feedbackCanvasRef.current;
-    if (!video || !canvas || !repMetrics?.length || !frameLandmarks?.length) return;
-
-    const ctx = canvas.getContext('2d');
-
-    const drawFeedback = () => {
-      const rect = video.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-      const videoFit = getVideoFitRect(video, canvas.width, canvas.height);
-      const t = video.currentTime;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Draw skeleton too
-      const closest = findClosestFrame(frameLandmarks, t);
-      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
-
-      // Find current rep
-      const currentRep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
-      if (currentRep) {
-        const { findings, score } = repInterpretation(currentRep, repMetrics);
-        const scoreColor = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
-        const scoreLabel = score >= 3 ? 'Excelente' : score >= 2 ? 'Aceptable' : 'Mejorable';
-
-        // Rep badge top-left
-        const bx = videoFit.x + 10;
-        const by = videoFit.y + 10;
-
-        // Background
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.beginPath();
-        ctx.roundRect(bx, by, 180, 28, 8);
-        ctx.fill();
-
-        ctx.font = 'bold 14px "Plus Jakarta Sans", "Inter", sans-serif';
-        ctx.fillStyle = 'white';
-        ctx.fillText(`Rep ${currentRep.repNumber}`, bx + 10, by + 19);
-
-        ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
-        ctx.fillStyle = scoreColor;
-        ctx.fillText(scoreLabel, bx + 80, by + 19);
-
-        ctx.fillStyle = 'white';
-        ctx.font = '12px "Inter", sans-serif';
-        ctx.fillText(`${currentRep.rom}°`, bx + 148, by + 19);
-
-        // Show top findings as overlaid labels
-        const topFindings = findings.slice(0, 2);
-        topFindings.forEach((f, i) => {
-          const fy = by + 38 + i * 26;
-          const bgColor = f.type === 'good' ? 'rgba(22,199,154,0.85)' : f.type === 'warn' ? 'rgba(233,69,96,0.85)' : 'rgba(245,166,35,0.85)';
-          const text = f.text.length > 45 ? f.text.substring(0, 45) + '...' : f.text;
-
-          ctx.fillStyle = bgColor;
-          ctx.beginPath();
-          ctx.roundRect(bx, fy, Math.min(videoFit.w - 20, 260), 22, 6);
-          ctx.fill();
-
-          ctx.font = '11px "Inter", sans-serif';
-          ctx.fillStyle = 'white';
-          ctx.fillText(text, bx + 8, fy + 15);
-        });
-      }
-
-      feedbackAnimRef.current = requestAnimationFrame(drawFeedback);
-    };
-
-    drawFeedback();
-    return () => {
-      if (feedbackAnimRef.current) cancelAnimationFrame(feedbackAnimRef.current);
-    };
-  }, [frameLandmarks, activeSide, repMetrics]);
-
   return (
     <div className="space-y-3">
       {/* Original video */}
@@ -536,9 +446,9 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
           muted
           className="w-full bg-black"
           style={{ maxHeight: '240px', objectFit: 'contain' }}
-          onPlay={() => handlePlay(originalVideoRef)}
-          onPause={() => handlePause(originalVideoRef)}
-          onSeeked={() => handleSeek(originalVideoRef)}
+          onPlay={() => handlePlay(originalVideoRef, skeletonVideoRef)}
+          onPause={() => handlePause(originalVideoRef, skeletonVideoRef)}
+          onSeeked={() => handleSeek(originalVideoRef, skeletonVideoRef)}
         />
       </div>
 
@@ -553,34 +463,12 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
             muted
             className="w-full bg-black"
             style={{ maxHeight: '240px', objectFit: 'contain' }}
-            onPlay={() => handlePlay(skeletonVideoRef)}
-            onPause={() => handlePause(skeletonVideoRef)}
-            onSeeked={() => handleSeek(skeletonVideoRef)}
+            onPlay={() => handlePlay(skeletonVideoRef, originalVideoRef)}
+            onPause={() => handlePause(skeletonVideoRef, originalVideoRef)}
+            onSeeked={() => handleSeek(skeletonVideoRef, originalVideoRef)}
           />
           <canvas
             ref={canvasRef}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none"
-          />
-        </div>
-      </div>
-
-      {/* Feedback annotated video */}
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-        <p className="text-xs font-semibold text-accent uppercase tracking-wide px-3 pt-2">Feedback por Rep</p>
-        <div className="relative">
-          <video
-            ref={feedbackVideoRef}
-            src={videoURL}
-            loop
-            muted
-            className="w-full bg-black"
-            style={{ maxHeight: '240px', objectFit: 'contain' }}
-            onPlay={() => handlePlay(feedbackVideoRef)}
-            onPause={() => handlePause(feedbackVideoRef)}
-            onSeeked={() => handleSeek(feedbackVideoRef)}
-          />
-          <canvas
-            ref={feedbackCanvasRef}
             className="absolute top-0 left-0 w-full h-full pointer-events-none"
           />
         </div>
@@ -602,6 +490,212 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
           </div>
         </div>
         <p className="text-[9px] text-ink/30 mt-1.5">Los videos están sincronizados — controla cualquiera de los dos.</p>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════
+// FEEDBACK VIEW (full-width, dedicated tab)
+// ════════════════════════════════════════════════
+function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalReps, duration }) {
+  const originalRef = useRef(null);
+  const feedbackRef = useRef(null);
+  const feedbackCanvasRef = useRef(null);
+  const animRef = useRef(null);
+  const syncingRef = useRef(false);
+
+  // Sync both videos
+  const sync = useCallback((src, tgt) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    if (tgt.current && src.current && Math.abs(tgt.current.currentTime - src.current.currentTime) > 0.1) {
+      tgt.current.currentTime = src.current.currentTime;
+    }
+    syncingRef.current = false;
+  }, []);
+
+  // Feedback canvas drawing
+  useEffect(() => {
+    const video = feedbackRef.current;
+    const canvas = feedbackCanvasRef.current;
+    if (!video || !canvas || !repMetrics?.length || !frameLandmarks?.length) return;
+
+    const ctx = canvas.getContext('2d');
+
+    const draw = () => {
+      const rect = video.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      const videoFit = getVideoFitRect(video, canvas.width, canvas.height);
+      const t = video.currentTime;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw skeleton
+      const closest = findClosestFrame(frameLandmarks, t);
+      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
+
+      // Find current rep
+      const currentRep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
+
+      if (currentRep) {
+        const { findings, score } = repInterpretation(currentRep, repMetrics);
+        const sColor = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+        const sLabel = score >= 3 ? 'Excelente' : score >= 2 ? 'Aceptable' : 'Mejorable';
+
+        const bx = videoFit.x + 16;
+        const by = videoFit.y + 16;
+        const panelW = Math.min(videoFit.w - 32, 420);
+
+        // Header badge
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, panelW, 48, 12);
+        ctx.fill();
+
+        ctx.font = 'bold 22px "Plus Jakarta Sans", "Inter", sans-serif';
+        ctx.fillStyle = 'white';
+        ctx.fillText(`Rep ${currentRep.repNumber}`, bx + 16, by + 33);
+
+        ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = sColor;
+        const labelX = bx + 120;
+        ctx.fillText(sLabel, labelX, by + 33);
+
+        // Metrics row
+        ctx.font = '16px "Inter", sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        const metricsText = `ROM ${currentRep.rom}°  •  TUT ${currentRep.tut}s  •  Tronco ${currentRep.maxTrunkLean}°`;
+        ctx.fillText(metricsText, labelX + ctx.measureText(sLabel).width + 16, by + 33);
+
+        // Findings
+        findings.slice(0, 3).forEach((f, i) => {
+          const fy = by + 60 + i * 38;
+          const bgColor = f.type === 'good' ? 'rgba(22,199,154,0.9)' : f.type === 'warn' ? 'rgba(233,69,96,0.9)' : 'rgba(245,166,35,0.9)';
+          const icon = f.type === 'good' ? '✓' : f.type === 'warn' ? '✗' : '!';
+          const text = f.text.length > 60 ? f.text.substring(0, 60) + '...' : f.text;
+
+          ctx.fillStyle = bgColor;
+          ctx.beginPath();
+          ctx.roundRect(bx, fy, panelW, 32, 8);
+          ctx.fill();
+
+          ctx.font = 'bold 15px "Inter", sans-serif';
+          ctx.fillStyle = 'white';
+          ctx.fillText(`${icon}  ${text}`, bx + 12, fy + 22);
+        });
+      } else {
+        // Between reps — show "Entre repeticiones"
+        const bx = videoFit.x + 16;
+        const by = videoFit.y + 16;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, 240, 40, 10);
+        ctx.fill();
+        ctx.font = '16px "Inter", sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('Entre repeticiones...', bx + 14, by + 27);
+      }
+
+      animRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [frameLandmarks, activeSide, repMetrics]);
+
+  return (
+    <div>
+      {/* Two videos side by side, full width */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Original */}
+        <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-ink/5">
+            <p className="text-sm font-semibold text-ink/60 uppercase tracking-wide">Video Original</p>
+          </div>
+          <video
+            ref={originalRef}
+            src={videoURL}
+            controls
+            loop
+            muted
+            className="w-full bg-black"
+            style={{ minHeight: '400px', maxHeight: '70vh', objectFit: 'contain' }}
+            onPlay={() => { sync(originalRef, feedbackRef); feedbackRef.current?.play(); }}
+            onPause={() => { feedbackRef.current?.pause(); sync(originalRef, feedbackRef); }}
+            onSeeked={() => sync(originalRef, feedbackRef)}
+          />
+        </div>
+
+        {/* Feedback */}
+        <div className="bg-white rounded-3xl shadow-sm overflow-hidden border-2 border-accent/20">
+          <div className="px-5 py-3 border-b border-accent/10 bg-accent/5">
+            <p className="text-sm font-semibold text-accent uppercase tracking-wide">Feedback en Tiempo Real</p>
+            <p className="text-xs text-ink/40 mt-0.5">Skeleton + evaluación por repetición</p>
+          </div>
+          <div className="relative">
+            <video
+              ref={feedbackRef}
+              src={videoURL}
+              loop
+              muted
+              className="w-full bg-black"
+              style={{ minHeight: '400px', maxHeight: '70vh', objectFit: 'contain' }}
+              onPlay={() => { sync(feedbackRef, originalRef); originalRef.current?.play(); }}
+              onPause={() => { originalRef.current?.pause(); sync(feedbackRef, originalRef); }}
+              onSeeked={() => sync(feedbackRef, originalRef)}
+            />
+            <canvas
+              ref={feedbackCanvasRef}
+              className="absolute top-0 left-0 w-full h-full pointer-events-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Legend + rep timeline */}
+      <div className="mt-6 bg-white rounded-3xl p-6 shadow-sm">
+        <div className="flex flex-wrap gap-6 items-center">
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-glow" />
+            <span className="text-sm text-ink/60">Excelente (3/3)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-full" style={{ backgroundColor: '#F5A623' }} />
+            <span className="text-sm text-ink/60">Aceptable (2/3)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-accent" />
+            <span className="text-sm text-ink/60">Mejorable (0-1/3)</span>
+          </div>
+        </div>
+
+        {/* Rep timeline bar */}
+        <div className="mt-5">
+          <p className="text-xs text-ink/40 uppercase tracking-wide font-medium mb-3">Timeline de repeticiones</p>
+          <div className="flex gap-2">
+            {repMetrics.map(rep => {
+              const { score } = repInterpretation(rep, repMetrics);
+              const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+              return (
+                <div key={rep.repNumber} className="flex-1 text-center">
+                  <div
+                    className="h-10 rounded-xl flex items-center justify-center font-mono font-bold text-white text-sm"
+                    style={{ backgroundColor: color }}
+                  >
+                    R{rep.repNumber}
+                  </div>
+                  <p className="text-xs text-ink/40 mt-1">{rep.rom}°</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <p className="text-xs text-ink/30 mt-4">
+          Dale play a cualquiera de los dos videos — están sincronizados. El panel derecho muestra el skeleton de MediaPipe con evaluación en vivo de cada repetición.
+        </p>
       </div>
     </div>
   );
@@ -632,6 +726,7 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
 
   const tabs = [
     { id: 'overview', label: 'Resumen' },
+    { id: 'feedback', label: 'Feedback' },
     { id: 'reps', label: 'Por Rep' },
     { id: 'timeseries', label: 'Gráficas' },
     { id: 'methodology', label: 'Metodología' },
@@ -674,48 +769,60 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
         </div>
       </div>
 
-      {/* Two-column layout: metrics left, video right */}
-      <div className="flex gap-8 items-start">
-        {/* Left: metrics */}
-        <div className="flex-1 min-w-0">
-          {/* Tab navigation */}
-          <div className="flex gap-1 bg-ink/5 rounded-2xl p-1.5 mb-8">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 py-3 text-base rounded-xl transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-white text-ink font-semibold shadow-sm'
-                    : 'text-ink/50 hover:text-ink/80'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab content */}
-          {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
-          {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
-          {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} repMetrics={repMetrics} />}
-          {activeTab === 'methodology' && <MethodologyTab repMetrics={repMetrics} summary={summary} />}
-        </div>
-
-        {/* Right: sticky video panel with skeleton overlay (desktop only) */}
-        {videoURL && (
-          <div className="hidden lg:block w-80 flex-shrink-0 sticky top-20">
-            <AnnotatedVideoPanel
-              videoURL={videoURL}
-              frameLandmarks={frameLandmarks}
-              activeSide={activeSide}
-              totalReps={totalReps}
-              duration={duration}
-              repMetrics={repMetrics}
-            />
-          </div>
-        )}
+      {/* Tab navigation — full width */}
+      <div className="flex gap-1 bg-ink/5 rounded-2xl p-1.5 mb-8">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 py-3 text-base rounded-xl transition-all ${
+              activeTab === tab.id
+                ? 'bg-white text-ink font-semibold shadow-sm'
+                : 'text-ink/50 hover:text-ink/80'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {/* Feedback tab: full-width, no sidebar */}
+      {activeTab === 'feedback' && videoURL && (
+        <FeedbackView
+          videoURL={videoURL}
+          frameLandmarks={frameLandmarks}
+          activeSide={activeSide}
+          repMetrics={repMetrics}
+          totalReps={totalReps}
+          duration={duration}
+        />
+      )}
+
+      {/* Other tabs: two-column layout with sidebar */}
+      {activeTab !== 'feedback' && (
+        <div className="flex gap-8 items-start">
+          <div className="flex-1 min-w-0">
+            {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
+            {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
+            {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} repMetrics={repMetrics} />}
+            {activeTab === 'methodology' && <MethodologyTab repMetrics={repMetrics} summary={summary} />}
+          </div>
+
+          {/* Right: sticky video panel (desktop only) */}
+          {videoURL && (
+            <div className="hidden lg:block w-80 flex-shrink-0 sticky top-20">
+              <AnnotatedVideoPanel
+                videoURL={videoURL}
+                frameLandmarks={frameLandmarks}
+                activeSide={activeSide}
+                totalReps={totalReps}
+                duration={duration}
+                repMetrics={repMetrics}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
