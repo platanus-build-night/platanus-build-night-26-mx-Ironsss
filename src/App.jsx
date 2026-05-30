@@ -758,11 +758,7 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
   };
 
   return (
-    <div className="mt-8">
-      <div className="flex items-center gap-3 mb-3">
-        <h3 className="font-display text-lg font-bold text-ink">Ejecucion Ideal</h3>
-        <span className="text-xs text-ink/30">Forma perfecta con {repMetrics.length} reps • Se pausa en cada rep</span>
-      </div>
+    <div>
       <MannequinViewer
         frameLandmarks={idealLandmarks}
         activeSide={activeSide}
@@ -771,31 +767,31 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
         getRepScore={getRepScore}
         idealMode
       />
-      <div className="bg-white rounded-2xl p-3 shadow-sm mt-3">
-        <div className="flex items-center gap-3">
+      <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
+        <div className="flex items-center gap-2">
           <button onClick={() => idealPlaying ? setIdealPlaying(false) : startIdeal()}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-white hover:opacity-80 transition-colors text-sm"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-white hover:opacity-80 transition-colors text-xs"
             style={{ backgroundColor: '#16C79A' }}>
             {idealPlaying ? '\u23F8' : '\u25B6'}
           </button>
           <button onClick={resetIdeal}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-ink/10 text-ink/60 hover:bg-ink/20 transition-colors text-sm"
+            className="w-8 h-8 flex items-center justify-center rounded-lg bg-ink/10 text-ink/60 hover:bg-ink/20 transition-colors text-xs"
             title="Reiniciar">
             \u21BB
           </button>
           <input type="range" min={0} max={idealDuration} step={0.01} value={idealTime}
             onChange={e => { setIdealTime(+e.target.value); idealPausedAtRepRef.current = null; }}
             className="flex-1" style={{ accentColor: '#16C79A' }} />
-          <span className="font-mono text-[10px] text-ink/40 w-14 text-right">{idealTime.toFixed(1)}s</span>
+          <span className="font-mono text-[9px] text-ink/40 w-12 text-right">{idealTime.toFixed(1)}s</span>
         </div>
-        <div className="flex items-center gap-1 mt-2">
-          <span className="text-[10px] text-ink/30 mr-1">Reps:</span>
+        <div className="flex items-center gap-1 mt-1.5">
+          <span className="text-[9px] text-ink/30 mr-1">Reps:</span>
           {repMetrics.map(rep => {
             const isActive = idealCurrentRep?.repNumber === rep.repNumber;
             return (
               <button key={rep.repNumber}
                 onClick={() => { setIdealTime(rep.startTime + 0.01); idealPausedAtRepRef.current = null; setIdealPlaying(false); }}
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
                 style={{ backgroundColor: '#16C79A' }}>{rep.repNumber}</button>
             );
           })}
@@ -1091,58 +1087,61 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
         </div>
       )}
 
-      {/* Digital Twin — Real (synced to video) */}
+      {/* Digital Twin — Real vs Ideal side by side */}
       {frameLandmarks?.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center gap-3 mb-3">
-            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Tu Ejecucion</h3>
-            <span className="text-xs text-ink/30">Sincronizado con el video • Arrastra para rotar</span>
+            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Real vs Ideal</h3>
+            <span className="text-xs text-ink/30">Compara tu ejecucion con la forma perfecta</span>
           </div>
-          <MannequinViewer
-            frameLandmarks={frameLandmarks}
-            activeSide={activeSide}
-            repMetrics={repMetrics}
-            currentTime={videoTime}
-            getRepScore={getRepScore}
-            currentRepData={currentRepData}
-          />
-          <div className="bg-white rounded-2xl p-3 shadow-sm mt-3">
-            <div className="flex items-center gap-3">
-              <button onClick={() => isPaused ? playVideo() : pauseVideo()}
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-ink text-white hover:bg-ink/80 transition-colors text-sm">
-                {isPaused ? '\u25B6' : '\u23F8'}
-              </button>
-              <input type="range" min={0} max={frameLandmarks[frameLandmarks.length - 1]?.timestamp || 1}
-                step={0.01} value={videoTime}
-                onChange={e => { if (feedbackRef.current) feedbackRef.current.currentTime = +e.target.value; }}
-                className="flex-1 accent-accent" />
-              <span className="font-mono text-[10px] text-ink/40 w-14 text-right">{videoTime.toFixed(1)}s</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Real twin */}
+            <div>
+              <MannequinViewer
+                frameLandmarks={frameLandmarks}
+                activeSide={activeSide}
+                repMetrics={repMetrics}
+                currentTime={videoTime}
+                getRepScore={getRepScore}
+                currentRepData={currentRepData}
+              />
+              <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => isPaused ? playVideo() : pauseVideo()}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-ink text-white hover:bg-ink/80 transition-colors text-xs">
+                    {isPaused ? '\u25B6' : '\u23F8'}
+                  </button>
+                  <input type="range" min={0} max={frameLandmarks[frameLandmarks.length - 1]?.timestamp || 1}
+                    step={0.01} value={videoTime}
+                    onChange={e => { if (feedbackRef.current) feedbackRef.current.currentTime = +e.target.value; }}
+                    className="flex-1 accent-accent" />
+                  <span className="font-mono text-[9px] text-ink/40 w-12 text-right">{videoTime.toFixed(1)}s</span>
+                </div>
+                <div className="flex items-center gap-1 mt-1.5">
+                  <span className="text-[9px] text-ink/30 mr-1">Reps:</span>
+                  {repMetrics.map(rep => {
+                    const score = getRepScore ? getRepScore(rep.repNumber) : 2;
+                    const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+                    const isActive = currentRepData?.rep.repNumber === rep.repNumber;
+                    return (
+                      <button key={rep.repNumber} onClick={() => jumpToRep(rep)}
+                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
+                        style={{ backgroundColor: color }}>{rep.repNumber}</button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-1 mt-2">
-              <span className="text-[10px] text-ink/30 mr-1">Reps:</span>
-              {repMetrics.map(rep => {
-                const score = getRepScore ? getRepScore(rep.repNumber) : 2;
-                const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
-                const isActive = currentRepData?.rep.repNumber === rep.repNumber;
-                return (
-                  <button key={rep.repNumber} onClick={() => jumpToRep(rep)}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
-                    style={{ backgroundColor: color }}>{rep.repNumber}</button>
-                );
-              })}
-            </div>
+
+            {/* Ideal twin */}
+            <IdealTwinSection
+              idealLandmarks={idealLandmarks}
+              activeSide={activeSide}
+              repMetrics={repMetrics}
+              getRepScore={getRepScore}
+            />
           </div>
         </div>
-      )}
-
-      {/* Digital Twin — Ideal (independent playback) */}
-      {idealLandmarks?.length > 0 && (
-        <IdealTwinSection
-          idealLandmarks={idealLandmarks}
-          activeSide={activeSide}
-          repMetrics={repMetrics}
-          getRepScore={getRepScore}
-        />
       )}
 
       {/* Segment Detail — FEA arm stress view */}
