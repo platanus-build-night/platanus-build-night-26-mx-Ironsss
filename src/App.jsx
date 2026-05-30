@@ -216,9 +216,28 @@ function ProcessingView({ progress, progressPct }) {
 
   const currentStage = [...stages].reverse().find(s => progressPct >= s.threshold) || stages[0];
 
+  const BONE_COUNT = 8;
+  const boneAngles = Array.from({ length: BONE_COUNT }, (_, i) => (360 / BONE_COUNT) * i);
+
   return (
     <div className="max-w-md mx-auto px-4 pt-16 text-center">
-      <div className="text-6xl mb-6 animate-pulse">🦴</div>
+      <div className="relative w-28 h-28 mx-auto mb-6">
+        <div className="absolute inset-0 animate-spin" style={{ animationDuration: '3s' }}>
+          {boneAngles.map((angle, i) => (
+            <span key={i} className="absolute text-2xl"
+              style={{
+                left: '50%', top: '50%',
+                transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-42px)`,
+                opacity: 0.4 + (i / BONE_COUNT) * 0.6,
+              }}>
+              🦴
+            </span>
+          ))}
+        </div>
+        <span className="absolute inset-0 flex items-center justify-center font-mono text-lg font-bold text-ink">
+          {progressPct}%
+        </span>
+      </div>
       <h2 className="font-display text-2xl mb-2">Analizando poses</h2>
       <p className="text-sm text-ink/60 mb-6 font-medium">{currentStage.label}</p>
 
@@ -228,7 +247,6 @@ function ProcessingView({ progress, progressPct }) {
           style={{ width: `${progressPct}%` }}
         />
       </div>
-      <p className="font-mono text-2xl font-bold text-ink mb-1">{progressPct}%</p>
       <p className="text-xs text-ink/40 mb-8">{progress}</p>
 
       {/* Stage indicators */}
