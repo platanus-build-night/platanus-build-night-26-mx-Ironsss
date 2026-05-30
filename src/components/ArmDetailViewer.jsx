@@ -346,7 +346,7 @@ export default function ArmDetailViewer({
     scene.add(upperWire, foreWire);
 
     // Joint spheres (shoulder, elbow, wrist)
-    const jMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.1 });
+    const jMat = new THREE.MeshStandardMaterial({ color: 0xE94560, roughness: 0.35, metalness: 0.1 });
     const shoulderSph = new THREE.Mesh(new THREE.SphereGeometry(0.048, 20, 14), jMat);
     const elbowSph = new THREE.Mesh(new THREE.SphereGeometry(0.042, 20, 14), jMat);
     const wristSph = new THREE.Mesh(new THREE.SphereGeometry(0.024, 16, 12), jMat);
@@ -485,10 +485,7 @@ export default function ArmDetailViewer({
     const capColor = stressColor(avgDeltoidStress);
     st.capMesh.material.color.setRGB(capColor.r, capColor.g, capColor.b);
 
-    // Elbow joint color
-    const avgElbowStress = foreStress.slice(0, 30).reduce((a, b) => a + b, 0) / 30;
-    const elbColor = stressColor(avgElbowStress);
-    st.elbowSph.material.color.setRGB(elbColor.r, elbColor.g, elbColor.b);
+    // Elbow joint stays pink (fixed color, no dynamic recolor)
 
     // Angle label
     const { sprite, ctx, texture } = st.label;
