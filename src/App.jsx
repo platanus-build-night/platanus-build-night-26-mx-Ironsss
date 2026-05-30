@@ -85,24 +85,24 @@ export default function App() {
   return (
     <div className="min-h-screen bg-bone">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-ink text-white px-6 py-0 flex items-center justify-between">
+      <header className="sticky top-0 z-50 bg-white text-ink px-6 py-0 flex items-center justify-between shadow-sm border-b border-ink/5">
         <button onClick={() => setView('upload')}>
           <img src={import.meta.env.BASE_URL + 'LogoEasyFisio.png'} alt="EasyFisio" className="h-14 object-contain" />
         </button>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-            <span className={demoMode ? 'text-glow' : 'text-white/50'}>Demo</span>
+            <span className={demoMode ? 'text-glow' : 'text-ink/50'}>Demo</span>
             <div
-              className={`w-10 h-5 rounded-full relative transition-colors ${demoMode ? 'bg-glow' : 'bg-white/20'}`}
+              className={`w-10 h-5 rounded-full relative transition-colors ${demoMode ? 'bg-glow' : 'bg-ink/20'}`}
               onClick={() => setDemoMode(!demoMode)}
             >
-              <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all ${demoMode ? 'left-5.5' : 'left-0.5'}`}
+              <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all shadow-sm border border-ink/10 ${demoMode ? 'left-5.5' : 'left-0.5'}`}
                 style={{ left: demoMode ? '22px' : '2px' }} />
             </div>
           </label>
           <button
             onClick={() => setView('history')}
-            className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full transition-colors"
+            className="text-xs bg-ink/5 hover:bg-ink/10 text-ink/70 px-3 py-1.5 rounded-full transition-colors"
           >
             Historial
           </button>
@@ -567,72 +567,113 @@ function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
   const shIdx = activeSide === 'left' ? 11 : 12;
   const elIdx = activeSide === 'left' ? 13 : 14;
   const wrIdx = activeSide === 'left' ? 15 : 16;
-  const hipL = 23, hipR = 24;
 
-  return frameLandmarks.map(frame => {
-    const lm = frame.landmarks.map(l => ({ ...l }));
+  // Smoothstep for butter-smooth transitions
+  const smooth = (x) => x * x * (3 - 2 * x);
+
+  // Compute stable average arm segment lengths across all frames
+  let totalUpper = 0, totalFore = 0, count = 0;
+  for (const frame of frameLandmarks) {
+    const lm = frame.landmarks;
+    if (!lm[shIdx] || !lm[elIdx] || !lm[wrIdx]) continue;
+    totalUpper += Math.sqrt((lm[elIdx].x - lm[shIdx].x) ** 2 + (lm[elIdx].y - lm[shIdx].y) ** 2);
+    totalFore += Math.sqrt((lm[wrIdx].x - lm[elIdx].x) ** 2 + (lm[wrIdx].y - lm[elIdx].y) ** 2);
+    count++;
+  }
+  const avgUpper = count > 0 ? totalUpper / count : 0.12;
+  const avgFore = count > 0 ? totalFore / count : 0.10;
+
+  // Pre-compute ideal angle for every frame as a continuous curve, then smooth it
+  const idealAngles = frameLandmarks.map(frame => {
     const t = frame.timestamp;
     const rep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
 
-    // Straighten trunk: average hip midpoint Y with shoulder midpoint Y to reduce lean
-    const midShY = (lm[11].y + lm[12].y) / 2;
-    const midHipY = (lm[hipL].y + lm[hipR].y) / 2;
-    const midShX = (lm[11].x + lm[12].x) / 2;
-    const midHipX = (lm[hipL].x + lm[hipR].x) / 2;
-    const trunkLean = midShX - midHipX;
-    // Shift shoulders to be directly above hips
-    lm[11].x -= trunkLean;
-    lm[12].x -= trunkLean;
-    lm[shIdx].x -= trunkLean;
-
-    // Compute upper arm & forearm lengths from original data
-    const origSh = frame.landmarks[shIdx];
-    const origEl = frame.landmarks[elIdx];
-    const origWr = frame.landmarks[wrIdx];
-    const upperLen = Math.sqrt((origEl.x - origSh.x) ** 2 + (origEl.y - origSh.y) ** 2);
-    const foreLen = Math.sqrt((origWr.x - origEl.x) ** 2 + (origWr.y - origEl.y) ** 2);
-
-    if (rep) {
-      const repDur = rep.endTime - rep.startTime;
-      const progress = Math.max(0, Math.min(1, (t - rep.startTime) / repDur));
-
-      // Ideal curl: smooth sine — 0→0.40 concentric, 0.40→0.50 hold, 0.50→1.0 eccentric (slower)
-      let angleNorm; // 0 = fully flexed, 1 = extended
-      if (progress < 0.40) {
-        angleNorm = Math.cos((progress / 0.40) * Math.PI) * 0.5 + 0.5; // 1→0
-      } else if (progress < 0.50) {
-        angleNorm = 0; // isometric hold at peak
-      } else {
-        angleNorm = (1 - Math.cos(((progress - 0.50) / 0.50) * Math.PI)) * 0.5; // 0→1
+    if (!rep) {
+      // Between reps — find proximity to nearest rep for smooth blend
+      let distToPrev = Infinity, distToNext = Infinity;
+      for (const r of repMetrics) {
+        if (r.endTime <= t) distToPrev = Math.min(distToPrev, t - r.endTime);
+        if (r.startTime >= t) distToNext = Math.min(distToNext, r.startTime - t);
       }
-
-      const idealAngleRad = ((30 + angleNorm * 130) * Math.PI) / 180; // 30°–160°
-
-      // Upper arm hangs straight down from shoulder
-      const sh = lm[shIdx];
-      lm[elIdx].x = sh.x;
-      lm[elIdx].y = sh.y + upperLen;
-      lm[elIdx].z = sh.z || 0;
-
-      // Forearm rotates around elbow at ideal angle
-      const el = lm[elIdx];
-      // Angle measured from upper arm vector (pointing down) — 0° means folded up
-      // The vector from elbow to shoulder is (0, -1) (up)
-      // We rotate the wrist direction from that by idealAngle
-      const sign = activeSide === 'left' ? -1 : 1;
-      lm[wrIdx].x = el.x + sign * Math.sin(idealAngleRad) * foreLen;
-      lm[wrIdx].y = el.y + Math.cos(idealAngleRad) * foreLen;
-      lm[wrIdx].z = el.z || 0;
-    } else {
-      // Between reps: resting position — arm hanging extended
-      const sh = lm[shIdx];
-      lm[elIdx].x = sh.x;
-      lm[elIdx].y = sh.y + upperLen;
-      lm[elIdx].z = sh.z || 0;
-      lm[wrIdx].x = lm[elIdx].x;
-      lm[wrIdx].y = lm[elIdx].y + foreLen;
-      lm[wrIdx].z = lm[elIdx].z || 0;
+      // Resting angle ~165° (slight natural bend, not perfectly straight)
+      return 165;
     }
+
+    const repDur = rep.endTime - rep.startTime;
+    const progress = Math.max(0, Math.min(1, (t - rep.startTime) / repDur));
+
+    // Ideal curl phases with smooth easing:
+    // 0.00–0.05: ease out of resting
+    // 0.05–0.40: concentric (flex) — 2 sec feel
+    // 0.40–0.55: isometric hold at peak contraction
+    // 0.55–1.00: eccentric (extend slowly) — 3 sec feel
+    let angleNorm; // 0 = fully flexed (35°), 1 = resting (165°)
+    if (progress < 0.05) {
+      // Ease from resting into concentric
+      angleNorm = 1 - smooth(progress / 0.05) * 0.05;
+    } else if (progress < 0.40) {
+      // Concentric phase — smooth flexion
+      const p = (progress - 0.05) / 0.35;
+      angleNorm = 0.95 * (1 - smooth(p));
+    } else if (progress < 0.55) {
+      // Isometric hold at peak
+      angleNorm = 0;
+    } else if (progress < 0.95) {
+      // Eccentric phase — slow controlled extension
+      const p = (progress - 0.55) / 0.40;
+      angleNorm = smooth(p) * 0.95;
+    } else {
+      // Ease back to resting
+      const p = (progress - 0.95) / 0.05;
+      angleNorm = 0.95 + smooth(p) * 0.05;
+    }
+
+    return 35 + angleNorm * 130; // 35° to 165°
+  });
+
+  // Apply a simple moving-average smoothing pass (window=5) to remove any remaining jitter
+  const smoothedAngles = idealAngles.map((a, i) => {
+    const win = 3;
+    let sum = 0, n = 0;
+    for (let j = Math.max(0, i - win); j <= Math.min(idealAngles.length - 1, i + win); j++) {
+      sum += idealAngles[j];
+      n++;
+    }
+    return sum / n;
+  });
+
+  return frameLandmarks.map((frame, fi) => {
+    const lm = frame.landmarks.map(l => ({ ...l }));
+
+    // Straighten trunk: shift upper body to align shoulders over hips
+    const midShX = (lm[11].x + lm[12].x) / 2;
+    const midHipX = (lm[23].x + lm[24].x) / 2;
+    const lean = midShX - midHipX;
+    lm[11].x -= lean;
+    lm[12].x -= lean;
+
+    // Place upper arm hanging straight down from shoulder (slight 5° forward lean for natural look)
+    const sh = lm[shIdx];
+    const fwdLean = 0.005; // tiny forward offset
+    lm[elIdx] = {
+      ...lm[elIdx],
+      x: sh.x + fwdLean,
+      y: sh.y + avgUpper,
+      z: (sh.z || 0),
+    };
+
+    // Rotate forearm around elbow at the ideal angle
+    const el = lm[elIdx];
+    const idealAngleRad = (smoothedAngles[fi] * Math.PI) / 180;
+    // Upper arm direction is (0, 1) in normalized coords (pointing down)
+    // Angle is measured from upper arm direction, rotating the forearm
+    const sign = activeSide === 'left' ? -1 : 1;
+    lm[wrIdx] = {
+      ...lm[wrIdx],
+      x: el.x + sign * Math.sin(idealAngleRad) * avgFore,
+      y: el.y + Math.cos(idealAngleRad) * avgFore,
+      z: (el.z || 0),
+    };
 
     return { ...frame, landmarks: lm };
   });
@@ -1558,10 +1599,7 @@ function TimeseriesTab({ timeSeries, repMetrics }) {
   const chartData = timeSeries.timestamps.map((t, i) => ({
     time: Math.round(t * 100) / 100,
     angle: Math.round(timeSeries.elbowAngles[i] * 10) / 10,
-    trunk: Math.round(timeSeries.trunkAngles[i] * 10) / 10,
-    // Optimal zones as constant fields for ReferenceArea
-    optAngleHigh: 180,
-    optAngleLow: 0,
+    trunk: Math.round(Math.abs(timeSeries.trunkAngles[i]) * 10) / 10,
   }));
 
   // Custom reference area component for optimal zones
@@ -1600,8 +1638,12 @@ function TimeseriesTab({ timeSeries, repMetrics }) {
 
       {/* Elbow angle over time */}
       <div className="bg-white rounded-3xl p-6 shadow-sm">
-        <h3 className="font-display text-xl font-bold mb-1">Ángulo del Codo</h3>
-        <p className="text-sm text-ink/40 mb-4">Flexión/extensión con zonas óptimas superpuestas</p>
+        <h3 className="font-display text-xl font-bold mb-1">Angulo del Codo</h3>
+        <p className="text-sm text-ink/40 mb-4">
+          Cada valle es una contraccion maxima. La linea debe bajar hasta la
+          <span style={{ color: '#16C79A' }}> zona verde (90°-140°) </span>
+          para lograr un ROM completo. Si se queda arriba, el rango es insuficiente.
+        </p>
         <ResponsiveContainer width="100%" height={300}>
           <AreaChart data={chartData}>
             <defs>
@@ -1611,71 +1653,85 @@ function TimeseriesTab({ timeSeries, repMetrics }) {
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#1A1A2E10" />
-            {/* Optimal zones */}
-            <ReferenceArea y1={90} y2={140} fill="#16C79A" fillOpacity={0.1} />
-            <ReferenceArea y1={60} y2={90} fill="#F5A623" fillOpacity={0.08} />
-            <ReferenceArea y1={0} y2={60} fill="#E94560" fillOpacity={0.06} />
-            {/* Rep start markers */}
+            <ReferenceArea y1={90} y2={140} fill="#16C79A" fillOpacity={0.12} label={{ value: 'ROM optimo', fontSize: 11, fill: '#16C79A' }} />
+            <ReferenceArea y1={60} y2={90} fill="#F5A623" fillOpacity={0.08} label={{ value: 'Moderado', fontSize: 10, fill: '#F5A623' }} />
+            <ReferenceArea y1={0} y2={60} fill="#E94560" fillOpacity={0.06} label={{ value: 'Hiperflexion', fontSize: 10, fill: '#E94560' }} />
             {repMetrics.map(rep => (
               <ReferenceLine
                 key={rep.repNumber}
                 x={Math.round(rep.startTime * 100) / 100}
-                stroke="#1A1A2E30"
+                stroke="#1A1A2E"
                 strokeDasharray="4 4"
-                label={{ value: `R${rep.repNumber}`, position: 'top', fontSize: 10, fill: '#1A1A2E66' }}
+                strokeOpacity={0.2}
+                label={{ value: `Rep ${rep.repNumber}`, position: 'top', fontSize: 10, fill: '#1A1A2E88' }}
               />
             ))}
             <XAxis dataKey="time" tick={{ fontSize: 11 }} label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -2, fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} domain={[0, 180]} label={{ value: '°', position: 'insideLeft', fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} domain={[0, 180]} label={{ value: 'Grados (°)', angle: -90, position: 'insideLeft', fontSize: 11, dx: -5 }} />
             <Tooltip
               contentStyle={{ fontSize: 13, borderRadius: 10, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              formatter={(v) => [`${v}°`, 'Ángulo codo']}
+              formatter={(v) => [`${v}°`, 'Angulo codo']}
               labelFormatter={(v) => `${v}s`}
             />
-            <ReferenceLine y={140} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} />
-            <ReferenceLine y={90} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} />
+            <ReferenceLine y={140} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.6} />
+            <ReferenceLine y={90} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.6} />
             <Area type="monotone" dataKey="angle" stroke="#E94560" fill="url(#angleGrad)" strokeWidth={2.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
+        <div className="mt-3 px-1 text-xs text-ink/50 leading-relaxed">
+          <strong>Como leer:</strong> Cada "V" representa una repeticion. El punto mas bajo es la contraccion maxima del biceps.
+          Un ROM amplio (la V baja hasta la zona verde) indica buena flexion. Si las V se hacen menos profundas hacia el final, hay fatiga.
+        </div>
       </div>
 
       {/* Trunk lean over time */}
       <div className="bg-white rounded-3xl p-6 shadow-sm">
-        <h3 className="font-display text-xl font-bold mb-1">Compensación del Tronco</h3>
-        <p className="text-sm text-ink/40 mb-4">Inclinación lateral — la zona verde es postura correcta</p>
-        <ResponsiveContainer width="100%" height={220}>
+        <h3 className="font-display text-xl font-bold mb-1">Compensacion del Tronco</h3>
+        <p className="text-sm text-ink/40 mb-4">
+          Inclinacion lateral del torso. Debe mantenerse en la
+          <span style={{ color: '#16C79A' }}> zona verde (0°-8°)</span>.
+          Picos altos indican que estas usando impulso del cuerpo en vez del biceps.
+        </p>
+        <ResponsiveContainer width="100%" height={250}>
           <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="trunkGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0F3460" stopOpacity={0.3} />
-                <stop offset="100%" stopColor="#0F3460" stopOpacity={0} />
+              <linearGradient id="trunkGrad" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stopColor="#16C79A" stopOpacity={0.15} />
+                <stop offset="40%" stopColor="#F5A623" stopOpacity={0.1} />
+                <stop offset="100%" stopColor="#E94560" stopOpacity={0.2} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#1A1A2E10" />
-            {/* Optimal zones for trunk */}
-            <ReferenceArea y1={0} y2={8} fill="#16C79A" fillOpacity={0.1} />
-            <ReferenceArea y1={8} y2={15} fill="#F5A623" fillOpacity={0.08} />
-            <ReferenceArea y1={15} y2={30} fill="#E94560" fillOpacity={0.06} />
-            {/* Rep markers */}
+            <ReferenceArea y1={0} y2={8} fill="#16C79A" fillOpacity={0.15} label={{ value: 'Estable', fontSize: 11, fill: '#16C79A', position: 'insideTopRight' }} />
+            <ReferenceArea y1={8} y2={15} fill="#F5A623" fillOpacity={0.10} label={{ value: 'Compensando', fontSize: 10, fill: '#F5A623', position: 'insideTopRight' }} />
+            <ReferenceArea y1={15} y2={30} fill="#E94560" fillOpacity={0.08} label={{ value: 'Excesivo', fontSize: 10, fill: '#E94560', position: 'insideTopRight' }} />
             {repMetrics.map(rep => (
               <ReferenceLine
                 key={rep.repNumber}
                 x={Math.round(rep.startTime * 100) / 100}
-                stroke="#1A1A2E20"
+                stroke="#1A1A2E"
                 strokeDasharray="4 4"
+                strokeOpacity={0.2}
+                label={{ value: `R${rep.repNumber}`, position: 'top', fontSize: 10, fill: '#1A1A2E66' }}
               />
             ))}
-            <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+            <XAxis dataKey="time" tick={{ fontSize: 11 }} label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -2, fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} domain={[0, 25]} label={{ value: 'Grados (°)', angle: -90, position: 'insideLeft', fontSize: 11, dx: -5 }} />
             <Tooltip
               contentStyle={{ fontSize: 13, borderRadius: 10, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              formatter={(v) => [`${v}°`, 'Tronco']}
+              formatter={(v) => [`${v}°`, 'Inclinacion']}
+              labelFormatter={(v) => `${v}s`}
             />
-            <ReferenceLine y={8} stroke="#16C79A" strokeDasharray="6 3" strokeOpacity={0.5} label={{ value: '8° ideal', fontSize: 10, fill: '#16C79A' }} />
-            <ReferenceLine y={15} stroke="#E94560" strokeDasharray="4 2" strokeOpacity={0.5} label={{ value: '15° límite', fontSize: 10, fill: '#E94560' }} />
+            <ReferenceLine y={8} stroke="#16C79A" strokeWidth={1.5} strokeDasharray="6 3" />
+            <ReferenceLine y={15} stroke="#E94560" strokeWidth={1.5} strokeDasharray="4 2" />
             <Area type="monotone" dataKey="trunk" stroke="#0F3460" fill="url(#trunkGrad)" strokeWidth={2.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
+        <div className="mt-3 px-1 text-xs text-ink/50 leading-relaxed">
+          <strong>Como leer:</strong> La linea debe permanecer en la zona verde (&lt;8°).
+          Cada pico coincide con el esfuerzo de subir el peso. Si los picos superan la zona amarilla,
+          estas "haciendo trampa" con el tronco — reduce el peso o apoya la espalda.
+        </div>
       </div>
 
       {/* Per-rep comparison table */}

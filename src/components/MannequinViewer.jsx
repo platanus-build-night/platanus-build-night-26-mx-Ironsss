@@ -69,6 +69,14 @@ function landmarksToWorld(landmarks, scale = 2.5) {
     -(l.z || 0) * scale * 0.5
   ));
 
+  // Center body on torso midpoint so it's always at origin
+  const torsoCenter = new THREE.Vector3()
+    .addVectors(
+      new THREE.Vector3().addVectors(points[LM.LEFT_SHOULDER], points[LM.RIGHT_SHOULDER]).multiplyScalar(0.5),
+      new THREE.Vector3().addVectors(points[LM.LEFT_HIP], points[LM.RIGHT_HIP]).multiplyScalar(0.5)
+    ).multiplyScalar(0.5);
+  for (const p of points) p.sub(torsoCenter);
+
   const MID_SHOULDER = new THREE.Vector3()
     .addVectors(points[LM.LEFT_SHOULDER], points[LM.RIGHT_SHOULDER]).multiplyScalar(0.5);
   const MID_HIP = new THREE.Vector3()
