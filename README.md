@@ -1,6 +1,6 @@
 # EasyFisio
 
-<img src="./project-logo.png" alt="EasyFisio Logo" width="200" />
+<img src="./LogoEasyFisio.png" alt="EasyFisio Logo" width="200" />
 
 Biomechanical analysis of therapeutic exercises using computer vision. **100% client-side** — no servers, no API keys, everything runs in the browser.
 
@@ -12,32 +12,62 @@ Hacker: **David Alexis Garcia Espinosa** ([@Ironsss](https://github.com/Ironsss)
 
 Upload a video of a **bicep curl** and get:
 
-- **8 clinical metrics** with automatic evaluation
-- **Rep detection** via elbow angle analysis
-- **Interactive charts** — time series and per-rep breakdown
-- **Radar profile** of movement quality
-- **Session history** (localStorage + demo mode)
+- **8 clinical metrics** with automatic evaluation and actionable tips
+- **Adaptive rep detection** via elbow angle analysis
+- **Real-time skeleton overlay** with MediaPipe Pose annotations on your video
+- **Optimal value comparison** — see where you are vs where you should be
+- **Per-rep interpretation** — detailed findings for each repetition
+- **Interactive charts** — time series, per-rep breakdown, and radar profile
+- **Methodology tab** — every formula explained with LaTeX rendering (KaTeX)
+- **Session history** (localStorage + demo mode with 6-week progression)
 
 ## Clinical Metrics
 
-| Metric | What it measures | Clinical use |
-|--------|-----------------|-------------|
-| ROM | Elbow range of motion | Joint recovery |
-| Angular Velocity | Neuromuscular control | Spasticity, power |
-| TUT | Time under tension | Exercise dosage |
-| C:E Ratio | Concentric vs eccentric tempo | Tendinopathies |
-| Fatigue Index | ROM degradation across the set | Load prescription |
-| Trunk Compensation | Torso lean angle | Technique, excessive load |
-| CV (Consistency) | Variability between reps | Motor control |
-| Hold Time | Pause at peak contraction | Isometric strength |
+| Metric | What it measures | Optimal | Clinical use |
+|--------|-----------------|---------|-------------|
+| ROM | Elbow range of motion | 120–140° | Joint recovery |
+| Angular Velocity | Neuromuscular control | 40–80 °/s | Spasticity, power |
+| TUT | Time under tension | 3–5s/rep | Exercise dosage |
+| C:E Ratio | Concentric vs eccentric tempo | 0.4–0.7 | Tendinopathies |
+| Fatigue Index | ROM degradation across the set | < 10% | Load prescription |
+| Trunk Compensation | Torso lean angle | < 5° | Technique, excessive load |
+| CV (Consistency) | Variability between reps | < 5% | Motor control |
+| Hold Time | Pause at peak contraction | 0.5–2.0s | Isometric strength |
 
 Full documentation with formulas and references: [`docs/CLINICAL_METRICS.md`](docs/CLINICAL_METRICS.md)
+
+## Features
+
+### Skeleton Overlay
+The analyzed video shows real-time MediaPipe Pose landmarks overlaid on playback:
+- **Active arm** highlighted in red with elbow angle displayed in real time
+- **Rest of body** shown in green (shoulders, torso, hips, legs)
+- Toggle on/off with the Skeleton button
+
+### Per-Rep Interpretation
+Each repetition gets a score (Excellent/Acceptable/Improvable) with contextual findings:
+- ROM comparison vs set average
+- Trunk compensation assessment with correction advice
+- Tempo analysis (concentric vs eccentric)
+- Fatigue detection in late reps
+- Isometric hold evaluation
+
+### Optimal Value Bars
+Every metric card shows a visual comparison bar: your current value vs the clinical optimal, with guidance on whether to increase or decrease.
+
+### Methodology Tab
+Full transparency on how every metric is calculated:
+- Step-by-step pipeline explanation (pose detection → angles → reps → metrics)
+- LaTeX-rendered formulas (KaTeX)
+- Reference ranges with color coding
+- Academic references for each metric
 
 ## Stack
 
 - **React 18** + **Vite 5** — fast builds, instant HMR
 - **MediaPipe Pose Landmarker** (WASM) — 33 landmarks, runs on browser GPU
 - **Recharts** — interactive, responsive charts
+- **KaTeX** — LaTeX formula rendering
 - **Tailwind CSS** (CDN) — responsive out of the box
 - **localStorage** — session history without a backend
 
@@ -56,19 +86,18 @@ Open `http://localhost:5173/rehab-motion/` in your browser.
 
 1. Go to **Settings > Pages > Source** and select **GitHub Actions**
 2. Push to `main` — the workflow in `.github/workflows/deploy.yml` handles the rest
-3. Your app will be at `https://platanus-build-night.github.io/platanus-build-night-26-mx-Ironsss/`
 
 ## Architecture
 
 ```
 src/
 ├── main.jsx              # Entry point
-├── App.jsx               # Main app with all views
-├── index.css             # Global styles
+├── App.jsx               # Main app: upload, processing, dashboard, history, methodology
+├── index.css             # Global styles + animations
 ├── analysis/
-│   └── engine.js         # Analysis engine: MediaPipe + angles + reps + metrics
+│   └── engine.js         # Analysis engine: MediaPipe + angles + adaptive rep detection + metrics
 └── data/
-    └── demoHistory.js    # Demo data: 6-week progression
+    └── demoHistory.js    # Demo data: 6-week rehabilitation progression
 ```
 
 ## Tips for recording videos

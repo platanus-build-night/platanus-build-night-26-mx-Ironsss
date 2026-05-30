@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -6,6 +6,24 @@ import {
 } from 'recharts';
 import { processVideo, assessMetric, saveSession, getHistory } from './analysis/engine';
 import { DEMO_HISTORY, getProgressionData } from './data/demoHistory';
+
+// ════════════════════════════════════════════════
+// LATEX COMPONENT
+// ════════════════════════════════════════════════
+function Latex({ expr, display = false }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && window.katex) {
+      try {
+        window.katex.render(expr, ref.current, {
+          throwOnError: false,
+          displayMode: display,
+        });
+      } catch { /* fallback to raw text */ }
+    }
+  }, [expr, display]);
+  return <span ref={ref} className="latex-formula" />;
+}
 
 // ════════════════════════════════════════════════
 // APP
@@ -179,21 +197,47 @@ function UploadView({ onFileSelect, onDrop, fileInputRef }) {
 // PROCESSING VIEW
 // ════════════════════════════════════════════════
 function ProcessingView({ progress, progressPct }) {
+  const stages = [
+    { label: 'Descargando motor de visión', threshold: 5 },
+    { label: 'Descargando modelo de pose', threshold: 15 },
+    { label: 'Inicializando modelo', threshold: 25 },
+    { label: 'Analizando frames', threshold: 30 },
+  ];
+
+  const currentStage = [...stages].reverse().find(s => progressPct >= s.threshold) || stages[0];
+
   return (
-    <div className="max-w-md mx-auto px-4 pt-24 text-center">
+    <div className="max-w-md mx-auto px-4 pt-16 text-center">
       <div className="text-6xl mb-6 animate-pulse">🦴</div>
       <h2 className="font-display text-2xl mb-2">Analizando poses</h2>
-      <p className="text-sm text-ink/60 mb-8">{progress}</p>
+      <p className="text-sm text-ink/60 mb-6 font-medium">{currentStage.label}</p>
 
-      <div className="w-full bg-ink/10 rounded-full h-3 mb-4 overflow-hidden">
+      <div className="w-full bg-ink/10 rounded-full h-4 mb-2 overflow-hidden">
         <div
-          className="h-full bg-gradient-to-r from-accent to-glow rounded-full transition-all duration-300 progress-glow"
+          className="h-full bg-gradient-to-r from-accent to-glow rounded-full transition-all duration-500 ease-out progress-glow"
           style={{ width: `${progressPct}%` }}
         />
       </div>
-      <p className="font-mono text-sm text-ink/40">{progressPct}%</p>
+      <p className="font-mono text-2xl font-bold text-ink mb-1">{progressPct}%</p>
+      <p className="text-xs text-ink/40 mb-8">{progress}</p>
 
-      <p className="text-xs text-ink/40 mt-12 max-w-xs mx-auto">
+      {/* Stage indicators */}
+      <div className="flex justify-between px-2 mb-10">
+        {stages.map((stage, i) => (
+          <div key={i} className="flex flex-col items-center gap-1">
+            <div className={`w-3 h-3 rounded-full transition-colors duration-300 ${
+              progressPct >= stage.threshold ? 'bg-glow' : 'bg-ink/15'
+            }`} />
+            <span className={`text-[10px] max-w-[70px] leading-tight ${
+              progressPct >= stage.threshold ? 'text-ink/70' : 'text-ink/30'
+            }`}>
+              {stage.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-xs text-ink/40 max-w-xs mx-auto">
         MediaPipe Pose Landmarker corriendo localmente en tu dispositivo.
         Ningún dato sale de tu navegador.
       </p>
@@ -202,21 +246,211 @@ function ProcessingView({ progress, progressPct }) {
 }
 
 // ════════════════════════════════════════════════
+// ANNOTATED VIDEO PANEL
+// ════════════════════════════════════════════════
+const POSE_CONNECTIONS = [
+  [11, 13], [13, 15], // left arm
+  [12, 14], [14, 16], // right arm
+  [11, 12],           // shoulders
+  [11, 23], [12, 24], // torso
+  [23, 24],           // hips
+  [23, 25], [25, 27], // left leg
+  [24, 26], [26, 28], // right leg
+];
+
+function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, duration }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const [showSkeleton, setShowSkeleton] = useState(true);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || !frameLandmarks?.length) return;
+
+    const ctx = canvas.getContext('2d');
+
+    const drawSkeleton = () => {
+      if (!showSkeleton) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        animFrameRef.current = requestAnimationFrame(drawSkeleton);
+        return;
+      }
+
+      const currentTime = video.currentTime;
+      // Find closest frame
+      let closest = frameLandmarks[0];
+      let minDist = Math.abs(currentTime - closest.timestamp);
+      for (let i = 1; i < frameLandmarks.length; i++) {
+        const dist = Math.abs(currentTime - frameLandmarks[i].timestamp);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = frameLandmarks[i];
+        }
+      }
+
+      const lm = closest.landmarks;
+      if (!lm) {
+        animFrameRef.current = requestAnimationFrame(drawSkeleton);
+        return;
+      }
+
+      // Match canvas to video display size
+      const rect = video.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Draw connections
+      ctx.lineWidth = 2.5;
+      for (const [a, b] of POSE_CONNECTIONS) {
+        const pa = lm[a];
+        const pb = lm[b];
+        if (!pa || !pb) continue;
+        // Highlight active arm
+        const isActiveArm = activeSide === 'left'
+          ? [11, 13, 15].includes(a) && [11, 13, 15].includes(b)
+          : [12, 14, 16].includes(a) && [12, 14, 16].includes(b);
+        ctx.strokeStyle = isActiveArm ? '#E94560' : 'rgba(22, 199, 154, 0.7)';
+        ctx.lineWidth = isActiveArm ? 3.5 : 2;
+        ctx.beginPath();
+        ctx.moveTo(pa.x * w, pa.y * h);
+        ctx.lineTo(pb.x * w, pb.y * h);
+        ctx.stroke();
+      }
+
+      // Draw joints
+      for (let i = 0; i < lm.length; i++) {
+        if (i > 28) break; // Only body landmarks
+        const p = lm[i];
+        const isActive = activeSide === 'left'
+          ? [11, 13, 15].includes(i)
+          : [12, 14, 16].includes(i);
+        ctx.fillStyle = isActive ? '#E94560' : 'rgba(22, 199, 154, 0.8)';
+        const r = isActive ? 5 : 3;
+        ctx.beginPath();
+        ctx.arc(p.x * w, p.y * h, r, 0, 2 * Math.PI);
+        ctx.fill();
+        // White border
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Draw elbow angle text near elbow
+      const elbowIdx = activeSide === 'left' ? 13 : 14;
+      const shoulderIdx = activeSide === 'left' ? 11 : 12;
+      const wristIdx = activeSide === 'left' ? 15 : 16;
+      if (lm[elbowIdx] && lm[shoulderIdx] && lm[wristIdx]) {
+        const elbow = lm[elbowIdx];
+        // Calculate angle
+        const sh = lm[shoulderIdx];
+        const wr = lm[wristIdx];
+        const ab = { x: sh.x - elbow.x, y: sh.y - elbow.y };
+        const cb = { x: wr.x - elbow.x, y: wr.y - elbow.y };
+        const dot = ab.x * cb.x + ab.y * cb.y;
+        const magAB = Math.sqrt(ab.x ** 2 + ab.y ** 2);
+        const magCB = Math.sqrt(cb.x ** 2 + cb.y ** 2);
+        const cosine = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
+        const angleDeg = Math.round(Math.acos(cosine) * (180 / Math.PI));
+
+        ctx.font = 'bold 14px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#E94560';
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth = 3;
+        const text = `${angleDeg}°`;
+        const tx = elbow.x * w + 12;
+        const ty = elbow.y * h - 8;
+        ctx.strokeText(text, tx, ty);
+        ctx.fillText(text, tx, ty);
+      }
+
+      animFrameRef.current = requestAnimationFrame(drawSkeleton);
+    };
+
+    video.addEventListener('play', drawSkeleton);
+    video.addEventListener('seeked', drawSkeleton);
+    // Start drawing if already playing or paused
+    drawSkeleton();
+
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      video.removeEventListener('play', drawSkeleton);
+      video.removeEventListener('seeked', drawSkeleton);
+    };
+  }, [frameLandmarks, activeSide, showSkeleton]);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+      <div className="relative">
+        <video
+          ref={videoRef}
+          src={videoURL}
+          controls
+          loop
+          className="w-full bg-black"
+          style={{ maxHeight: '400px', objectFit: 'contain' }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+        />
+      </div>
+      <div className="p-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-ink/70">Tu video</p>
+            <p className="text-[10px] text-ink/40 mt-0.5">
+              Brazo {activeSide === 'left' ? 'izq.' : 'der.'} • {totalReps} reps • {Math.round(duration)}s
+            </p>
+          </div>
+          <button
+            onClick={() => setShowSkeleton(!showSkeleton)}
+            className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
+              showSkeleton
+                ? 'bg-accent/10 text-accent font-medium'
+                : 'bg-ink/5 text-ink/40'
+            }`}
+          >
+            {showSkeleton ? 'Skeleton ON' : 'Skeleton OFF'}
+          </button>
+        </div>
+        <div className="flex gap-2 mt-2">
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-accent" />
+            <span className="text-[9px] text-ink/40">Brazo activo</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-glow" />
+            <span className="text-[9px] text-ink/40">Resto del cuerpo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════
 // DASHBOARD VIEW
 // ════════════════════════════════════════════════
 function DashboardView({ results, videoURL, onNewAnalysis }) {
-  const { summary, repMetrics, timeSeries, totalReps, activeSide, duration } = results;
-  const [activeTab, setActiveTab] = useState('overview'); // overview | reps | timeseries
+  const { summary, repMetrics, timeSeries, totalReps, activeSide, duration, frameLandmarks } = results;
+  const [activeTab, setActiveTab] = useState('overview');
 
   const tabs = [
     { id: 'overview', label: 'Resumen' },
     { id: 'reps', label: 'Por Rep' },
     { id: 'timeseries', label: 'Serie Temporal' },
+    { id: 'methodology', label: 'Metodología' },
   ];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
-      {/* Summary header */}
+    <div className="max-w-7xl mx-auto px-4 py-6 pb-24">
+      {/* Summary header — full width */}
       <div className="bg-ink text-white rounded-2xl p-5 mb-6">
         <div className="flex justify-between items-start mb-4">
           <div>
@@ -240,27 +474,47 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
         </div>
       </div>
 
-      {/* Tab navigation */}
-      <div className="flex gap-1 bg-ink/5 rounded-xl p-1 mb-6">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-2 text-sm rounded-lg transition-all ${
-              activeTab === tab.id
-                ? 'bg-white text-ink font-medium shadow-sm'
-                : 'text-ink/50 hover:text-ink/80'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Two-column layout: metrics left, video right */}
+      <div className="flex gap-6 items-start">
+        {/* Left: metrics */}
+        <div className="flex-1 min-w-0">
+          {/* Tab navigation */}
+          <div className="flex gap-1 bg-ink/5 rounded-xl p-1 mb-6">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 py-2 text-sm rounded-lg transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-white text-ink font-medium shadow-sm'
+                    : 'text-ink/50 hover:text-ink/80'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-      {/* Tab content */}
-      {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
-      {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
-      {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} />}
+          {/* Tab content */}
+          {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
+          {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
+          {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} />}
+          {activeTab === 'methodology' && <MethodologyTab />}
+        </div>
+
+        {/* Right: sticky video panel with skeleton overlay (desktop only) */}
+        {videoURL && (
+          <div className="hidden lg:block w-80 flex-shrink-0 sticky top-20">
+            <AnnotatedVideoPanel
+              videoURL={videoURL}
+              frameLandmarks={frameLandmarks}
+              activeSide={activeSide}
+              totalReps={totalReps}
+              duration={duration}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -314,6 +568,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle={`σ = ${summary.stdROM}°`}
           assessment={assessMetric('rom', summary.meanROM)}
           detail="Rango de movimiento promedio del codo en todas las repeticiones"
+          optimal={{ value: '120–140°', current: summary.meanROM, unit: '°', target: 130, max: 180 }}
         />
         <MetricCard
           title="Ratio C:E"
@@ -321,6 +576,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle="concéntrico/excéntrico"
           assessment={assessMetric('ceRatio', summary.meanCERatio)}
           detail="Ideal ≈ 0.5 (1:2). Excéntrica debe durar el doble que concéntrica"
+          optimal={{ value: '0.4–0.7', current: summary.meanCERatio, unit: '', target: 0.55, max: 2 }}
         />
         <MetricCard
           title="Índice Fatiga"
@@ -328,6 +584,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle="ROM: primeras vs últimas"
           assessment={assessMetric('fatigueROM', summary.fatigueIndexROM)}
           detail="Degradación del ROM entre primeras y últimas repeticiones"
+          optimal={{ value: '< 10%', current: summary.fatigueIndexROM, unit: '%', target: 5, max: 50, lower: true }}
         />
         <MetricCard
           title="Compensación"
@@ -335,20 +592,37 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle={`media: ${summary.meanTrunkCompensation}°`}
           assessment={assessMetric('trunkLean', summary.maxTrunkCompensation)}
           detail="Inclinación del tronco. > 10° indica peso excesivo"
+          optimal={{ value: '< 5°', current: summary.maxTrunkCompensation, unit: '°', target: 3, max: 30, lower: true }}
         />
         <MetricCard
           title="TUT Total"
           value={`${summary.totalTUT}s`}
           subtitle={`${summary.meanTUT}s por rep`}
-          assessment={{ label: summary.meanTUT > 3 ? 'Adecuado' : 'Bajo', color: summary.meanTUT > 3 ? '#16C79A' : '#F5A623', icon: summary.meanTUT > 3 ? '✓' : '⚡' }}
-          detail="Tiempo bajo tensión total y por repetición"
+          assessment={{
+            label: summary.meanTUT > 3 ? 'Adecuado' : 'Bajo',
+            color: summary.meanTUT > 3 ? '#16C79A' : '#F5A623',
+            icon: summary.meanTUT > 3 ? '✓' : '⚡',
+            tip: summary.meanTUT > 3
+              ? 'Buen tiempo bajo tensión. Cada repetición tiene suficiente duración para estimular el músculo. Mantén este ritmo.'
+              : 'Tus repeticiones son muy rápidas. Intenta un tempo controlado: 1-2 segundos subiendo y 2-3 segundos bajando. Más tiempo bajo tensión = más estímulo muscular y mejores resultados.',
+          }}
+          detail="Tiempo bajo tensión total y por repetición. Para hipertrofia: 3-5s por rep. Para rehabilitación: 4-8s por rep."
+          optimal={{ value: '3–5s/rep', current: summary.meanTUT, unit: 's', target: 4, max: 10 }}
         />
         <MetricCard
           title="Hold Pico"
           value={`${summary.meanHoldTime}s`}
           subtitle="en contracción máxima"
-          assessment={{ label: summary.meanHoldTime > 0.3 ? 'Con pausa' : 'Sin pausa', color: summary.meanHoldTime > 0.3 ? '#16C79A' : '#F5A623', icon: summary.meanHoldTime > 0.3 ? '✓' : '—' }}
-          detail="Tiempo en máxima flexión por repetición"
+          assessment={{
+            label: summary.meanHoldTime > 0.3 ? 'Con pausa' : 'Sin pausa',
+            color: summary.meanHoldTime > 0.3 ? '#16C79A' : '#F5A623',
+            icon: summary.meanHoldTime > 0.3 ? '✓' : '—',
+            tip: summary.meanHoldTime > 0.3
+              ? 'Buena pausa isométrica en la contracción máxima. Esto mejora la activación muscular y la fuerza en el punto más exigente del ejercicio.'
+              : 'No hay pausa en la contracción máxima. Prueba sostener 1-2 segundos arriba (cuando el antebrazo toca el bíceps) antes de bajar. Esto activa más fibras musculares y mejora la conexión mente-músculo.',
+          }}
+          detail="Tiempo en máxima flexión por repetición. Protocolos isométricos (0.5-2s de pausa) son analgésicos en tendinopatías."
+          optimal={{ value: '0.5–2.0s', current: summary.meanHoldTime, unit: 's', target: 1, max: 5 }}
         />
       </div>
 
@@ -373,7 +647,61 @@ function OverviewTab({ summary, repMetrics }) {
   );
 }
 
-function MetricCard({ title, value, subtitle, assessment, detail }) {
+function OptimalBar({ optimal, assessment }) {
+  if (!optimal) return null;
+  const { current, target, max, lower } = optimal;
+  // For "lower is better" metrics, invert the visual
+  const clampedCurrent = Math.max(0, Math.min(current, max));
+  const currentPct = (clampedCurrent / max) * 100;
+  const targetPct = (target / max) * 100;
+
+  // How close to optimal (0 = at target, 1 = far away)
+  const distance = Math.abs(current - target);
+  const maxDistance = max * 0.5;
+  const closeness = Math.max(0, 100 - (distance / maxDistance) * 100);
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-ink/40">Tu valor</span>
+        <span className="text-[10px] text-ink/40">Meta: <strong className="text-ink/60">{optimal.value}</strong></span>
+      </div>
+      <div className="relative w-full h-3 bg-ink/5 rounded-full overflow-visible">
+        {/* Current value bar */}
+        <div
+          className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${currentPct}%`,
+            backgroundColor: assessment.color,
+            opacity: 0.7,
+          }}
+        />
+        {/* Optimal zone marker */}
+        <div
+          className="absolute top-[-3px] w-0.5 h-[18px] rounded-full bg-ink/60"
+          style={{ left: `${targetPct}%` }}
+          title={`Óptimo: ${target}${optimal.unit}`}
+        />
+        <div
+          className="absolute top-[-12px] text-[8px] font-mono text-ink/50 -translate-x-1/2"
+          style={{ left: `${targetPct}%` }}
+        >
+          {target}{optimal.unit}
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] font-mono" style={{ color: assessment.color }}>
+          {current}{optimal.unit}
+        </span>
+        <span className="text-[10px] text-ink/30">
+          {closeness >= 80 ? 'En zona óptima' : closeness >= 50 ? 'Cerca del óptimo' : lower ? 'Reducir para mejorar' : 'Aumentar para mejorar'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, subtitle, assessment, detail, optimal }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div
@@ -387,9 +715,22 @@ function MetricCard({ title, value, subtitle, assessment, detail }) {
         <span className="text-xs font-medium" style={{ color: assessment.color }}>
           {assessment.icon} {assessment.label}
         </span>
+        <span className="text-[10px] text-ink/30 ml-auto">{expanded ? '▲' : '▼'} ver más</span>
       </div>
+
+      {/* Optimal comparison bar — always visible */}
+      <OptimalBar optimal={optimal} assessment={assessment} />
+
       {expanded && (
-        <p className="text-xs text-ink/50 mt-2 pt-2 border-t border-ink/10">{detail}</p>
+        <div className="mt-3 pt-3 border-t border-ink/10 space-y-2">
+          <p className="text-xs text-ink/50">{detail}</p>
+          {assessment.tip && (
+            <div className="bg-bone rounded-lg p-3" style={{ borderLeft: `3px solid ${assessment.color}` }}>
+              <p className="text-[10px] font-medium text-ink/60 mb-1">Consejo</p>
+              <p className="text-xs text-ink/70 leading-relaxed">{assessment.tip}</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -398,52 +739,180 @@ function MetricCard({ title, value, subtitle, assessment, detail }) {
 // ────────────────────────────────────────────
 // REPS TAB
 // ────────────────────────────────────────────
+function repInterpretation(rep, repMetrics) {
+  const findings = [];
+  const romAssess = assessMetric('rom', rep.rom);
+  const trunkAssess = assessMetric('trunkLean', rep.maxTrunkLean);
+  const ceAssess = assessMetric('ceRatio', rep.ceRatio);
+
+  // ROM comparison vs set average
+  const avgROM = repMetrics.reduce((s, r) => s + r.rom, 0) / repMetrics.length;
+  const romDiff = rep.rom - avgROM;
+  if (romDiff < -10) {
+    findings.push({ type: 'warn', text: `ROM ${Math.abs(Math.round(romDiff))}° por debajo del promedio del set. Posible fatiga o dolor limitando el rango.` });
+  } else if (romDiff > 10) {
+    findings.push({ type: 'good', text: `ROM ${Math.round(romDiff)}° por encima del promedio. Buena amplitud en esta repetición.` });
+  }
+
+  // Trunk
+  if (rep.maxTrunkLean > 10) {
+    findings.push({ type: 'warn', text: `Compensación del tronco de ${rep.maxTrunkLean}°. Estás usando impulso lumbar para subir el peso. Reduce la carga o apoya la espalda.` });
+  } else if (rep.maxTrunkLean > 5) {
+    findings.push({ type: 'caution', text: `Ligera inclinación del tronco (${rep.maxTrunkLean}°). Activa el core y mantén la espalda recta.` });
+  } else {
+    findings.push({ type: 'good', text: 'Postura estable. El bíceps está haciendo todo el trabajo.' });
+  }
+
+  // Tempo
+  if (rep.ceRatio > 1.2) {
+    findings.push({ type: 'warn', text: `Fase excéntrica demasiado rápida (ratio ${rep.ceRatio}). Estás dejando caer el peso. Baja en 2-3 segundos controlados.` });
+  } else if (rep.ceRatio < 0.4) {
+    findings.push({ type: 'caution', text: `Excéntrica muy lenta (ratio ${rep.ceRatio}). Bien para rehab de tendones, pero si buscas hipertrofia apunta a un ratio ~0.5.` });
+  } else if (rep.ceRatio >= 0.4 && rep.ceRatio <= 0.7) {
+    findings.push({ type: 'good', text: `Tempo ideal (${rep.tConcentric}s subiendo, ${rep.tEccentric}s bajando). Buen control concéntrico-excéntrico.` });
+  }
+
+  // TUT
+  if (rep.tut < 2) {
+    findings.push({ type: 'warn', text: `Rep muy rápida (${rep.tut}s). El músculo no recibe suficiente estímulo. Intenta mínimo 3 segundos por rep.` });
+  } else if (rep.tut > 6) {
+    findings.push({ type: 'good', text: `Excelente tiempo bajo tensión (${rep.tut}s). Gran estímulo muscular.` });
+  }
+
+  // Hold
+  if (rep.holdTime > 0.5) {
+    findings.push({ type: 'good', text: `Pausa isométrica de ${rep.holdTime}s en contracción máxima. Excelente para activación muscular.` });
+  }
+
+  // Fatigue: late reps
+  if (rep.repNumber > repMetrics.length * 0.7 && rep.rom < avgROM * 0.85) {
+    findings.push({ type: 'caution', text: 'El rango se acorta en las últimas reps. Señal de fatiga — considera terminar el set aquí en próximas sesiones.' });
+  }
+
+  // Overall score for this rep
+  const score = (romAssess.color === '#16C79A' ? 1 : 0)
+    + (trunkAssess.color === '#16C79A' ? 1 : 0)
+    + (ceAssess.color === '#16C79A' ? 1 : 0);
+
+  return { findings, score };
+}
+
 function RepsTab({ repMetrics }) {
+  const [expandedRep, setExpandedRep] = useState(null);
+
   return (
     <div className="space-y-3">
-      {repMetrics.map((rep) => (
-        <div key={rep.repNumber} className="bg-white rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="font-display text-lg">Rep {rep.repNumber}</h4>
-            <span className="font-mono text-sm text-ink/50">{rep.tut}s</span>
+      {repMetrics.map((rep) => {
+        const { findings, score } = repInterpretation(rep, repMetrics);
+        const isExpanded = expandedRep === rep.repNumber;
+        const scoreColor = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+        const scoreLabel = score >= 3 ? 'Excelente' : score >= 2 ? 'Aceptable' : 'Mejorable';
+
+        return (
+          <div
+            key={rep.repNumber}
+            className="bg-white rounded-2xl shadow-sm cursor-pointer transition-all"
+            onClick={() => setExpandedRep(isExpanded ? null : rep.repNumber)}
+          >
+            {/* Header */}
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <h4 className="font-display text-lg">Rep {rep.repNumber}</h4>
+                  <span
+                    className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: scoreColor + '20', color: scoreColor }}
+                  >
+                    {scoreLabel}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-ink/50">{rep.tut}s</span>
+                  <span className="text-ink/30 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                </div>
+              </div>
+
+              {/* Metrics row */}
+              <div className="grid grid-cols-5 gap-2 text-center">
+                <div>
+                  <p className="font-mono text-base font-bold" style={{ color: assessMetric('rom', rep.rom).color }}>{rep.rom}°</p>
+                  <p className="text-[10px] text-ink/40">ROM</p>
+                </div>
+                <div>
+                  <p className="font-mono text-base font-bold" style={{ color: assessMetric('ceRatio', rep.ceRatio).color }}>{rep.ceRatio}</p>
+                  <p className="text-[10px] text-ink/40">C:E Ratio</p>
+                </div>
+                <div>
+                  <p className="font-mono text-base font-bold" style={{ color: assessMetric('trunkLean', rep.maxTrunkLean).color }}>
+                    {rep.maxTrunkLean}°
+                  </p>
+                  <p className="text-[10px] text-ink/40">Tronco</p>
+                </div>
+                <div>
+                  <p className="font-mono text-base font-bold">{rep.holdTime}s</p>
+                  <p className="text-[10px] text-ink/40">Hold</p>
+                </div>
+                <div>
+                  <p className="font-mono text-base font-bold">{rep.peakVelocity}°/s</p>
+                  <p className="text-[10px] text-ink/40">Vel. pico</p>
+                </div>
+              </div>
+
+              {/* Tempo bar */}
+              <div className="mt-3">
+                <div className="flex h-2 rounded-full overflow-hidden bg-ink/5">
+                  <div
+                    className="bg-accent h-full rounded-l-full"
+                    style={{ width: `${rep.tut > 0 ? (rep.tConcentric / rep.tut) * 100 : 50}%` }}
+                  />
+                  <div
+                    className="bg-glow h-full rounded-r-full"
+                    style={{ width: `${rep.tut > 0 ? (rep.tEccentric / rep.tut) * 100 : 50}%` }}
+                  />
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-[10px] text-accent">Conc. {rep.tConcentric}s</span>
+                  <span className="text-[10px] text-glow">Exc. {rep.tEccentric}s</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Expanded: findings */}
+            {isExpanded && (
+              <div className="px-4 pb-4 pt-1 border-t border-ink/5">
+                <p className="text-[10px] font-medium text-ink/50 mb-2 uppercase tracking-wide">Interpretación</p>
+                <div className="space-y-2">
+                  {findings.map((f, i) => (
+                    <div
+                      key={i}
+                      className="flex gap-2 items-start text-xs rounded-lg p-2"
+                      style={{
+                        backgroundColor: f.type === 'good' ? '#16C79A10' : f.type === 'warn' ? '#E9456010' : '#F5A62310',
+                        borderLeft: `3px solid ${f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623'}`,
+                      }}
+                    >
+                      <span className="flex-shrink-0 mt-0.5">
+                        {f.type === 'good' ? '✓' : f.type === 'warn' ? '⚠️' : '⚡'}
+                      </span>
+                      <p className="text-ink/70 leading-relaxed">{f.text}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Angle range detail */}
+                <div className="mt-3 bg-bone rounded-lg p-3">
+                  <p className="text-[10px] font-medium text-ink/50 mb-1">Detalle de ángulo</p>
+                  <div className="flex gap-4 text-xs text-ink/60">
+                    <span>Mín: <strong className="text-ink">{rep.minAngle}°</strong> (máx flexión)</span>
+                    <span>Máx: <strong className="text-ink">{rep.maxAngle}°</strong> (extensión)</span>
+                    <span>Vel. media: <strong className="text-ink">{rep.meanVelocity}°/s</strong></span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="font-mono text-lg font-bold" style={{ color: assessMetric('rom', rep.rom).color }}>{rep.rom}°</p>
-              <p className="text-[10px] text-ink/40">ROM</p>
-            </div>
-            <div>
-              <p className="font-mono text-lg font-bold">{rep.ceRatio}</p>
-              <p className="text-[10px] text-ink/40">C:E Ratio</p>
-            </div>
-            <div>
-              <p className="font-mono text-lg font-bold" style={{ color: assessMetric('trunkLean', rep.maxTrunkLean).color }}>
-                {rep.maxTrunkLean}°
-              </p>
-              <p className="text-[10px] text-ink/40">Tronco</p>
-            </div>
-          </div>
-          {/* Mini bar showing concentric vs eccentric */}
-          <div className="mt-3">
-            <div className="flex h-2 rounded-full overflow-hidden bg-ink/5">
-              <div
-                className="bg-accent h-full rounded-l-full"
-                style={{ width: `${(rep.tConcentric / rep.tut) * 100}%` }}
-                title={`Concéntrica: ${rep.tConcentric}s`}
-              />
-              <div
-                className="bg-glow h-full rounded-r-full"
-                style={{ width: `${(rep.tEccentric / rep.tut) * 100}%` }}
-                title={`Excéntrica: ${rep.tEccentric}s`}
-              />
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] text-accent">Conc. {rep.tConcentric}s</span>
-              <span className="text-[10px] text-glow">Exc. {rep.tEccentric}s</span>
-            </div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -510,6 +979,237 @@ function TimeseriesTab({ timeSeries }) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════
+// METHODOLOGY TAB
+// ════════════════════════════════════════════════
+const METRICS_INFO = [
+  {
+    name: 'ROM — Rango de Movimiento',
+    what: 'Mide cuántos grados recorre tu codo en cada repetición, desde la extensión máxima (brazo estirado) hasta la flexión máxima (mano cerca del hombro).',
+    how: 'Se detectan 3 puntos del cuerpo con la cámara: hombro, codo y muñeca. Con esos 3 puntos se forma un ángulo en el codo. La fórmula es el arcocoseno del producto punto entre los vectores hombro→codo y muñeca→codo, convertido a grados.',
+    formulas: [
+      '\\theta = \\arccos\\!\\left(\\frac{\\vec{A} \\cdot \\vec{B}}{\\|\\vec{A}\\|\\;\\|\\vec{B}\\|}\\right) \\quad \\text{donde } \\vec{A}=\\text{hombro}-\\text{codo},\\; \\vec{B}=\\text{muñeca}-\\text{codo}',
+      '\\text{ROM}_{\\text{rep}} = \\theta_{\\max} - \\theta_{\\min}',
+    ],
+    ranges: [
+      { label: 'Limitado', value: '< 80°', color: '#E94560' },
+      { label: 'Moderado', value: '80–110°', color: '#F5A623' },
+      { label: 'Normal', value: '110–140°', color: '#16C79A' },
+      { label: 'Excelente', value: '> 140°', color: '#16C79A' },
+    ],
+    reference: 'Norkin & White, Measurement of Joint Motion: A Guide to Goniometry, 6th Ed.',
+  },
+  {
+    name: 'Velocidad Angular',
+    what: 'Mide qué tan rápido o lento se mueve tu codo durante el ejercicio. Velocidad alta = movimiento explosivo. Velocidad baja = movimiento controlado.',
+    how: 'Se calcula el cambio de ángulo entre un frame y el siguiente, dividido por el tiempo entre frames. Luego se obtiene la velocidad pico (máxima instantánea) y la velocidad media de cada repetición.',
+    formulas: [
+      '\\omega_{\\text{inst}} = \\frac{|\\theta(t) - \\theta(t-1)|}{\\Delta t} \\quad [°/\\text{s}]',
+      '\\omega_{\\text{pico}} = \\max(\\omega_{\\text{inst}}) \\quad \\text{dentro de la fase}',
+    ],
+    ranges: [
+      { label: 'Muy lento (rehab)', value: '15–30 °/s', color: '#F5A623' },
+      { label: 'Controlado', value: '40–80 °/s', color: '#16C79A' },
+      { label: 'Explosivo', value: '100–200 °/s', color: '#E94560' },
+    ],
+    reference: 'Winter, D.A., Biomechanics and Motor Control of Human Movement, 4th Ed.',
+  },
+  {
+    name: 'TUT — Tiempo Bajo Tensión',
+    what: 'Es el tiempo total que tu músculo está trabajando durante cada repetición y durante todo el set. Más TUT = más estímulo para el músculo.',
+    how: 'Se mide el tiempo desde que empieza el movimiento de la repetición (el ángulo empieza a cambiar) hasta que vuelve a la posición inicial. La suma de todas las reps da el TUT total.',
+    formulas: [
+      '\\text{TUT}_{\\text{rep}} = t_{\\text{fin}} - t_{\\text{inicio}}',
+      '\\text{TUT}_{\\text{total}} = \\sum_{i=1}^{n} \\text{TUT}_{\\text{rep}_i}',
+    ],
+    ranges: [
+      { label: 'Fuerza máxima', value: '1–3s por rep', color: '#F5A623' },
+      { label: 'Hipertrofia', value: '3–5s por rep', color: '#16C79A' },
+      { label: 'Resistencia/rehab', value: '4–8s por rep', color: '#16C79A' },
+    ],
+    reference: 'Burd et al. (2012), Muscle time under tension during resistance exercise, J Physiol.',
+  },
+  {
+    name: 'Ratio C:E — Concéntrico vs Excéntrico',
+    what: 'Compara cuánto tardas subiendo el peso (fase concéntrica) vs bajándolo (fase excéntrica). Lo ideal es bajar más lento de lo que subes.',
+    how: 'Dentro de cada repetición, se identifica el punto de máxima flexión (ángulo mínimo). Todo antes de ese punto es la fase concéntrica (subir), todo después es la fase excéntrica (bajar). Se divide el tiempo concéntrico entre el excéntrico.',
+    formulas: [
+      '\\text{Ratio}_{\\text{C:E}} = \\frac{t_{\\text{concéntrico}}}{t_{\\text{excéntrico}}}',
+      '\\text{Ideal} \\approx 0.5 \\quad (\\text{ej. } 1\\text{s subir}, \\; 2\\text{s bajar})',
+    ],
+    ranges: [
+      { label: 'Exc. muy lento', value: '< 0.4', color: '#F5A623' },
+      { label: 'Ideal', value: '0.4–0.7', color: '#16C79A' },
+      { label: 'Aceptable', value: '0.7–1.2', color: '#16C79A' },
+      { label: 'Sin control exc.', value: '> 1.2', color: '#E94560' },
+    ],
+    reference: 'Alfredson H. et al. (1998), Heavy-load eccentric calf muscle training, Am J Sports Med.',
+  },
+  {
+    name: 'Índice de Fatiga',
+    what: 'Mide cuánto se deteriora tu rango de movimiento entre las primeras y las últimas repeticiones del set. Más fatiga = el músculo se cansa y el movimiento se acorta.',
+    how: 'Se compara el ROM promedio de las 3 primeras reps con el de las 3 últimas. La diferencia, expresada como porcentaje, es el índice de fatiga.',
+    formulas: [
+      '\\text{FI}_{\\text{ROM}} = \\frac{\\overline{\\text{ROM}}_{\\text{1\\text{-}3}} - \\overline{\\text{ROM}}_{\\text{últ. 3}}}{\\overline{\\text{ROM}}_{\\text{1\\text{-}3}}} \\times 100\\%',
+    ],
+    ranges: [
+      { label: 'Mínima', value: '< 10%', color: '#16C79A' },
+      { label: 'Moderada', value: '10–25%', color: '#F5A623' },
+      { label: 'Excesiva', value: '> 25%', color: '#E94560' },
+    ],
+    reference: 'Enoka & Duchateau (2008), Muscle fatigue: what, why and how it influences muscle function, J Physiol.',
+  },
+  {
+    name: 'Compensación del Tronco',
+    what: 'Mide cuánto inclinas el torso hacia atrás durante el ejercicio. Si te inclinas mucho, estás usando impulso del cuerpo en vez de fuerza del bíceps.',
+    how: 'Se detectan los puntos del hombro y la cadera. Se calcula el ángulo que forma la línea hombro-cadera respecto a la vertical. Cualquier desviación de la vertical es compensación.',
+    formulas: [
+      '\\theta_{\\text{tronco}} = \\arctan2\\!\\left(x_{\\text{hombro}} - x_{\\text{cadera}},\\; y_{\\text{cadera}} - y_{\\text{hombro}}\\right)',
+      '\\text{Compensación} = |\\theta_{\\text{tronco}}| \\quad [°]',
+    ],
+    ranges: [
+      { label: 'Ideal', value: '< 5°', color: '#16C79A' },
+      { label: 'Leve', value: '5–10°', color: '#F5A623' },
+      { label: 'Significativa', value: '> 10°', color: '#E94560' },
+    ],
+    reference: 'Sahrmann, S., Movement System Impairment Syndromes of the Extremities.',
+  },
+  {
+    name: 'CV — Consistencia entre Reps',
+    what: 'Mide qué tan parecidas son tus repeticiones entre sí. Un CV bajo significa que cada rep es casi idéntica (buen control motor). Un CV alto significa movimiento errático.',
+    how: 'Se calcula la desviación estándar del ROM de todas las repeticiones y se divide por el ROM promedio. El resultado se expresa como porcentaje.',
+    formulas: [
+      '\\text{CV} = \\frac{\\sigma_{\\text{ROM}}}{\\mu_{\\text{ROM}}} \\times 100\\%',
+      '\\sigma = \\sqrt{\\frac{1}{n-1}\\sum_{i=1}^{n}(\\text{ROM}_i - \\mu)^2}',
+    ],
+    ranges: [
+      { label: 'Alta consistencia', value: '< 5%', color: '#16C79A' },
+      { label: 'Normal', value: '5–15%', color: '#F5A623' },
+      { label: 'Inconsistente', value: '> 15%', color: '#E94560' },
+    ],
+    reference: 'Stergiou & Decker (2011), Human Movement Variability, Nonlinear Dynamics, and Pathology.',
+  },
+  {
+    name: 'Hold Time — Pausa Isométrica',
+    what: 'Mide cuánto tiempo sostienes la contracción máxima (el punto más alto del curl, cuando el antebrazo toca el bíceps). Una pausa intencional aumenta la activación muscular.',
+    how: 'Se define un umbral cerca del ángulo mínimo de cada rep (ángulo mínimo + 10°). Se mide cuánto tiempo el ángulo permanece por debajo de ese umbral.',
+    formulas: [
+      '\\theta_{\\text{umbral}} = \\theta_{\\min} + 10°',
+      't_{\\text{hold}} = \\sum \\Delta t \\quad \\text{donde } \\theta < \\theta_{\\text{umbral}}',
+    ],
+    ranges: [
+      { label: 'Sin pausa', value: '< 0.3s', color: '#F5A623' },
+      { label: 'Pausa controlada', value: '0.5–2.0s', color: '#16C79A' },
+      { label: 'Isométrico terapéutico', value: '2–5s', color: '#16C79A' },
+    ],
+    reference: 'Rio et al. (2015), Isometric exercise induces analgesia in patellar tendinopathy, Br J Sports Med.',
+  },
+];
+
+function MethodologyTab() {
+  const [openMetric, setOpenMetric] = useState(null);
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+        <h3 className="font-display text-xl mb-2">Cómo funciona EasyFisio</h3>
+        <div className="space-y-3 text-sm text-ink/70 leading-relaxed">
+          <p>
+            <strong className="text-ink">1. Detección de pose:</strong> Tu video se procesa completamente en el navegador usando
+            <strong> MediaPipe Pose Landmarker</strong>, un modelo de inteligencia artificial de Google que detecta 33 puntos del cuerpo humano en cada frame del video. Ningún dato sale de tu dispositivo.
+          </p>
+          <p>
+            <strong className="text-ink">2. Extracción de ángulos:</strong> Con los puntos del hombro, codo y muñeca se calcula
+            el ángulo del codo en cada frame (a 15 fps). La señal se suaviza con un promedio móvil de 5 frames para eliminar ruido.
+          </p>
+          <p>
+            <strong className="text-ink">3. Detección de repeticiones:</strong> Un algoritmo de máquina de estados detecta cada repetición
+            identificando ciclos de flexión y extensión. Los umbrales se adaptan automáticamente al rango de movimiento real de tu video.
+          </p>
+          <p>
+            <strong className="text-ink">4. Cálculo de métricas:</strong> Para cada repetición y para el set completo se calculan
+            las 8 métricas clínicas que se describen a continuación, basadas en literatura de biomecánica y rehabilitación.
+          </p>
+        </div>
+      </div>
+
+      <p className="text-xs text-ink/40 uppercase tracking-wide font-medium px-1">Las 8 métricas clínicas</p>
+
+      {METRICS_INFO.map((metric, i) => {
+        const isOpen = openMetric === i;
+        return (
+          <div
+            key={i}
+            className="bg-white rounded-2xl shadow-sm overflow-hidden cursor-pointer"
+            onClick={() => setOpenMetric(isOpen ? null : i)}
+          >
+            <div className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="w-7 h-7 rounded-full bg-ink/5 flex items-center justify-center text-xs font-mono font-bold text-ink/50">
+                  {i + 1}
+                </span>
+                <h4 className="font-display text-base">{metric.name}</h4>
+              </div>
+              <span className="text-ink/30 text-xs">{isOpen ? '▲' : '▼'}</span>
+            </div>
+
+            {isOpen && (
+              <div className="px-4 pb-4 space-y-4 border-t border-ink/5 pt-3">
+                {/* What */}
+                <div>
+                  <p className="text-[10px] font-medium text-ink/40 uppercase tracking-wide mb-1">Qué mide</p>
+                  <p className="text-sm text-ink/70 leading-relaxed">{metric.what}</p>
+                </div>
+
+                {/* How */}
+                <div>
+                  <p className="text-[10px] font-medium text-ink/40 uppercase tracking-wide mb-1">Cómo se calcula</p>
+                  <p className="text-sm text-ink/70 leading-relaxed">{metric.how}</p>
+                </div>
+
+                {/* Formulas */}
+                <div className="bg-ink/5 rounded-lg p-4">
+                  <p className="text-[10px] font-medium text-ink/40 uppercase tracking-wide mb-3">Fórmulas</p>
+                  <div className="space-y-3">
+                    {metric.formulas.map((f, j) => (
+                      <div key={j} className="overflow-x-auto py-1 text-center">
+                        <Latex expr={f} display={true} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Ranges */}
+                <div>
+                  <p className="text-[10px] font-medium text-ink/40 uppercase tracking-wide mb-2">Rangos de referencia</p>
+                  <div className="flex flex-wrap gap-2">
+                    {metric.ranges.map((r, j) => (
+                      <div
+                        key={j}
+                        className="flex items-center gap-2 text-xs rounded-lg px-3 py-1.5"
+                        style={{ backgroundColor: r.color + '15', border: `1px solid ${r.color}30` }}
+                      >
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+                        <span className="font-medium" style={{ color: r.color }}>{r.label}</span>
+                        <span className="text-ink/50">{r.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Reference */}
+                <div className="border-t border-ink/5 pt-3">
+                  <p className="text-[10px] text-ink/40 italic">Ref: {metric.reference}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

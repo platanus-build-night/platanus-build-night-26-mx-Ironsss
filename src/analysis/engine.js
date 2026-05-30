@@ -63,12 +63,12 @@ function stdDev(arr) {
 let poseLandmarker = null;
 
 export async function initPoseLandmarker(onProgress) {
-  onProgress?.('Cargando módulos de visión...');
-  const vision = await FilesetResolver.createForVisionTasks(
+  onProgress?.('Descargando módulos de visión... (5%)');
+  const vision = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
   );
 
-  onProgress?.('Cargando modelo de pose...');
+  onProgress?.('Descargando modelo de pose (~8MB)... (15%)');
   poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath:
@@ -79,7 +79,7 @@ export async function initPoseLandmarker(onProgress) {
     numPoses: 1,
   });
 
-  onProgress?.('Modelo listo');
+  onProgress?.('Modelo listo, preparando análisis... (25%)');
   return poseLandmarker;
 }
 
@@ -168,7 +168,7 @@ export async function processVideo(videoFile, onProgress, onFrame) {
         }
 
         frameIndex++;
-        const pct = Math.round((frameIndex / totalFrames) * 100);
+        const pct = 30 + Math.round((frameIndex / totalFrames) * 70);
         onProgress?.(`Analizando frame ${frameIndex}/${totalFrames} (${pct}%)`);
 
         // Use setTimeout to avoid blocking the UI
@@ -180,7 +180,7 @@ export async function processVideo(videoFile, onProgress, onFrame) {
         reject(new Error('Error al cargar el video'));
       };
 
-      onProgress?.(`Iniciando análisis: ${totalFrames} frames a ${ANALYSIS_FPS} fps`);
+      onProgress?.(`Iniciando análisis: ${totalFrames} frames a ${ANALYSIS_FPS} fps (30%)`);
       processNextFrame();
     };
 
@@ -216,6 +216,12 @@ function analyzeSession(rawData) {
 
   // Detect reps
   const reps = detectReps(smoothedAngles, timestamps);
+
+  if (reps.length === 0) {
+    return {
+      error: 'No se detectaron repeticiones. Asegúrate de grabar un curl de bíceps de perfil con buena iluminación y rango de movimiento amplio.',
+    };
+  }
 
   // Calculate per-rep metrics
   const repMetrics = reps.map((rep, i) => {
@@ -308,11 +314,18 @@ function analyzeSession(rawData) {
     ? Math.round((stdDev(allROMs) / mean(allROMs)) * 1000) / 10
     : 0;
 
+  // Store landmarks per frame for skeleton overlay
+  const frameLandmarks = rawData.map(d => ({
+    timestamp: d.timestamp,
+    landmarks: d.landmarks,
+  }));
+
   return {
     activeSide,
     totalReps: reps.length,
     duration: timestamps[timestamps.length - 1] - timestamps[0],
     repMetrics,
+    frameLandmarks,
     timeSeries: {
       timestamps,
       elbowAngles: smoothedAngles,
@@ -329,7 +342,7 @@ function analyzeSession(rawData) {
       meanCERatio: Math.round(mean(repMetrics.map(r => r.ceRatio)) * 100) / 100,
       fatigueIndexROM: fatigueROM,
       fatigueIndexVelocity: fatigueVel,
-      maxTrunkCompensation: Math.round(Math.max(...repMetrics.map(r => r.maxTrunkLean)) * 10) / 10,
+      maxTrunkCompensation: repMetrics.length ? Math.round(Math.max(...repMetrics.map(r => r.maxTrunkLean)) * 10) / 10 : 0,
       meanTrunkCompensation: Math.round(mean(repMetrics.map(r => r.meanTrunkLean)) * 10) / 10,
       meanHoldTime: Math.round(mean(repMetrics.map(r => r.holdTime)) * 100) / 100,
     },
@@ -341,20 +354,23 @@ function analyzeSession(rawData) {
 // REP DETECTION
 // ──────────────────────────────────────────────
 function detectReps(angles, timestamps) {
-  // State machine approach:
-  // EXTENDING (angle increasing, arm straightening)
-  // FLEXING (angle decreasing, curling up)
-  // A rep = one full cycle: extend → flex → extend
+  // Adaptive thresholds based on actual signal range
+  const minAngle = Math.min(...angles);
+  const maxAngle = Math.max(...angles);
+  const range = maxAngle - minAngle;
+
+  // If range is too small, no real movement detected
+  if (range < 15) return [];
+
+  // Thresholds: enter flexion at 65% of range, exit at 55% (more forgiving)
+  const FLEX_THRESHOLD = minAngle + range * 0.65;
+  const EXT_THRESHOLD = minAngle + range * 0.55;
+  const RISE_THRESHOLD = range * 0.20;
 
   const reps = [];
-  let state = 'IDLE'; // IDLE → FLEXING → EXTENDING → complete
+  let state = 'IDLE';
   let repStartIdx = 0;
-  let lastPeakIdx = 0;
   let minAngleInRep = 180;
-
-  // We use a derivative-based approach with hysteresis
-  const FLEX_THRESHOLD = 120; // Start of curl (angle drops below this)
-  const EXT_THRESHOLD = 140; // End of curl (angle rises above this)
 
   for (let i = 1; i < angles.length; i++) {
     const angle = angles[i];
@@ -363,7 +379,7 @@ function detectReps(angles, timestamps) {
       case 'IDLE':
         if (angle < FLEX_THRESHOLD) {
           state = 'FLEXING';
-          repStartIdx = Math.max(0, i - 3); // Include a few frames before
+          repStartIdx = Math.max(0, i - 3);
           minAngleInRep = angle;
         }
         break;
@@ -372,17 +388,15 @@ function detectReps(angles, timestamps) {
         if (angle < minAngleInRep) {
           minAngleInRep = angle;
         }
-        if (angle > minAngleInRep + 20 && angle > REP_ANGLE_THRESHOLD) {
-          // Angle is rising significantly = entering eccentric phase
+        if (angle > minAngleInRep + RISE_THRESHOLD) {
           state = 'EXTENDING';
         }
         break;
 
       case 'EXTENDING':
         if (angle > EXT_THRESHOLD) {
-          // Rep complete
           const repDuration = (timestamps[i] - timestamps[repStartIdx]) * 1000;
-          if (repDuration > MIN_REP_DURATION_MS && minAngleInRep < FLEX_THRESHOLD) {
+          if (repDuration > MIN_REP_DURATION_MS) {
             reps.push({
               startIdx: repStartIdx,
               endIdx: i,
@@ -396,6 +410,19 @@ function detectReps(angles, timestamps) {
     }
   }
 
+  // Capture last rep if video ends mid-extension
+  if (state === 'EXTENDING' || state === 'FLEXING') {
+    const i = angles.length - 1;
+    const repDuration = (timestamps[i] - timestamps[repStartIdx]) * 1000;
+    if (repDuration > MIN_REP_DURATION_MS && minAngleInRep < FLEX_THRESHOLD) {
+      reps.push({
+        startIdx: repStartIdx,
+        endIdx: i,
+        minAngle: minAngleInRep,
+      });
+    }
+  }
+
   return reps;
 }
 
@@ -405,36 +432,53 @@ function detectReps(angles, timestamps) {
 export function assessMetric(metric, value) {
   const assessments = {
     rom: [
-      { max: 80, label: 'Limitado', color: '#E94560', icon: '⚠️' },
-      { max: 110, label: 'Moderado', color: '#F5A623', icon: '⚡' },
-      { max: 140, label: 'Normal', color: '#16C79A', icon: '✓' },
-      { max: 999, label: 'Excelente', color: '#16C79A', icon: '★' },
+      { max: 80, label: 'Limitado', color: '#E94560', icon: '⚠️',
+        tip: 'Tu rango de movimiento es bajo. Intenta extender el brazo completamente antes de cada rep y flexionar hasta que la mano se acerque al hombro. Si hay dolor, reduce el peso y consulta a tu fisioterapeuta.' },
+      { max: 110, label: 'Moderado', color: '#F5A623', icon: '⚡',
+        tip: 'Buen progreso pero aún puedes mejorar. Enfócate en estirar completamente el brazo abajo y subir la mancuerna hasta el hombro. Un calentamiento previo con movilidad articular puede ayudar.' },
+      { max: 140, label: 'Normal', color: '#16C79A', icon: '✓',
+        tip: 'Rango de movimiento saludable. Mantén esta amplitud en cada repetición. Si buscas más desafío, incrementa el peso gradualmente manteniendo el mismo rango.' },
+      { max: 999, label: 'Excelente', color: '#16C79A', icon: '★',
+        tip: 'Rango de movimiento completo y óptimo. Estás aprovechando toda la amplitud articular del codo. Sigue así.' },
     ],
     fatigueROM: [
-      { max: 10, label: 'Mínima', color: '#16C79A', icon: '✓' },
-      { max: 25, label: 'Moderada', color: '#F5A623', icon: '⚡' },
-      { max: 999, label: 'Excesiva', color: '#E94560', icon: '⚠️' },
+      { max: 10, label: 'Mínima', color: '#16C79A', icon: '✓',
+        tip: 'Excelente resistencia muscular. El rango se mantiene estable durante todo el set. El peso es adecuado para tu nivel actual.' },
+      { max: 25, label: 'Moderada', color: '#F5A623', icon: '⚡',
+        tip: 'Fatiga normal para un set exigente. Si quieres mejorar, prueba reducir 1-2 reps o bajar un poco el peso. También ayuda descansar 90-120 segundos entre sets.' },
+      { max: 999, label: 'Excesiva', color: '#E94560', icon: '⚠️',
+        tip: 'Tu forma se deteriora mucho al final del set. Reduce el peso un 15-20% o haz menos repeticiones. Es mejor hacer 8 reps con buena forma que 12 con técnica pobre.' },
     ],
     cvROM: [
-      { max: 5, label: 'Alta consistencia', color: '#16C79A', icon: '★' },
-      { max: 15, label: 'Normal', color: '#F5A623', icon: '✓' },
-      { max: 999, label: 'Inconsistente', color: '#E94560', icon: '⚠️' },
+      { max: 5, label: 'Alta consistencia', color: '#16C79A', icon: '★',
+        tip: 'Movimiento muy consistente, señal de excelente control motor. Cada repetición es prácticamente idéntica. Dominas bien este ejercicio.' },
+      { max: 15, label: 'Normal', color: '#F5A623', icon: '✓',
+        tip: 'Variabilidad aceptable. Para mejorar la consistencia, usa un espejo o grábate de perfil. Concéntrate en hacer cada rep con la misma velocidad y amplitud.' },
+      { max: 999, label: 'Inconsistente', color: '#E94560', icon: '⚠️',
+        tip: 'Cada repetición es muy diferente. Esto suele indicar fatiga, peso excesivo, o un patrón de movimiento no consolidado. Reduce el peso y haz reps lentas y controladas enfocándote en la técnica.' },
     ],
     trunkLean: [
-      { max: 5, label: 'Ideal', color: '#16C79A', icon: '✓' },
-      { max: 10, label: 'Leve', color: '#F5A623', icon: '⚡' },
-      { max: 999, label: 'Significativa', color: '#E94560', icon: '⚠️' },
+      { max: 5, label: 'Ideal', color: '#16C79A', icon: '✓',
+        tip: 'Postura excelente. Tu tronco se mantiene recto, lo que significa que el bíceps está haciendo todo el trabajo sin compensaciones.' },
+      { max: 10, label: 'Leve', color: '#F5A623', icon: '⚡',
+        tip: 'Hay una ligera inclinación del tronco. Intenta pegar la espalda contra una pared o usar un banco con respaldo para eliminar la compensación. Activa el core antes de cada rep.' },
+      { max: 999, label: 'Significativa', color: '#E94560', icon: '⚠️',
+        tip: 'Estás usando el tronco para impulsar el peso, lo que reduce el trabajo del bíceps y puede lesionar la zona lumbar. Baja el peso significativamente y haz el ejercicio sentado con respaldo, o de pie con la espalda contra la pared.' },
     ],
     ceRatio: [
-      { max: 0.4, label: 'Exc. muy lento', color: '#F5A623', icon: '⚡' },
-      { max: 0.7, label: 'Ideal', color: '#16C79A', icon: '★' },
-      { max: 1.2, label: 'Aceptable', color: '#16C79A', icon: '✓' },
-      { max: 999, label: 'Sin control exc.', color: '#E94560', icon: '⚠️' },
+      { max: 0.4, label: 'Exc. muy lento', color: '#F5A623', icon: '⚡',
+        tip: 'La fase excéntrica (bajar) es muy lenta respecto a la concéntrica (subir). Está bien para protocolos de rehabilitación de tendones, pero si buscas hipertrofia general, intenta un tempo 1:2 (1s subir, 2s bajar).' },
+      { max: 0.7, label: 'Ideal', color: '#16C79A', icon: '★',
+        tip: 'Tempo perfecto. Subes controlado y bajas más lento, maximizando el estímulo muscular. Este ratio es ideal tanto para rehabilitación como para fortalecimiento.' },
+      { max: 1.2, label: 'Aceptable', color: '#16C79A', icon: '✓',
+        tip: 'Buen control general. Para optimizar, intenta bajar el peso un poco más lento (cuenta "uno-dos" mientras bajas). La fase excéntrica es donde más se fortalece el músculo.' },
+      { max: 999, label: 'Sin control exc.', color: '#E94560', icon: '⚠️',
+        tip: 'Estás dejando caer el peso en lugar de bajarlo con control. Esto reduce la efectividad del ejercicio y aumenta el riesgo de lesión. Baja el peso un 20% y enfócate en bajar lento: cuenta 2-3 segundos mientras extiendes el brazo.' },
     ],
   };
 
   const rules = assessments[metric];
-  if (!rules) return { label: '—', color: '#999', icon: '' };
+  if (!rules) return { label: '—', color: '#999', icon: '', tip: '' };
   for (const rule of rules) {
     if (value <= rule.max) return rule;
   }
