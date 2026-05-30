@@ -561,11 +561,13 @@ function drawBodyOverlay(ctx, lm, videoFit, score) {
 function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalReps, duration }) {
   const feedbackRef = useRef(null);
   const feedbackCanvasRef = useRef(null);
+  const containerRef = useRef(null);
   const animRef = useRef(null);
   const [currentRepData, setCurrentRepData] = useState(null);
   const [isPaused, setIsPaused] = useState(true);
   const lastPausedRepRef = useRef(null);
   const [autoMode, setAutoMode] = useState(true);
+  const [barWidths, setBarWidths] = useState({ left: 0, right: 0 });
 
   const playVideo = useCallback(() => {
     feedbackRef.current?.play();
@@ -583,7 +585,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
     pauseVideo();
   }, [pauseVideo]);
 
-  // Canvas drawing: body overlay + skeleton
+  // Canvas drawing: body overlay + skeleton + compute bar widths
   useEffect(() => {
     const video = feedbackRef.current;
     const canvas = feedbackCanvasRef.current;
@@ -598,6 +600,16 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
       const videoFit = getVideoFitRect(video, canvas.width, canvas.height);
       const t = video.currentTime;
 
+      // Update bar widths for HTML overlay positioning
+      const leftBar = videoFit.x;
+      const rightBar = canvas.width - (videoFit.x + videoFit.w);
+      setBarWidths(prev => {
+        if (Math.abs(prev.left - leftBar) > 2 || Math.abs(prev.right - rightBar) > 2) {
+          return { left: leftBar, right: rightBar };
+        }
+        return prev;
+      });
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const closest = findClosestFrame(frameLandmarks, t);
@@ -607,21 +619,17 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
         const { findings, score } = repInterpretation(rep, repMetrics);
         setCurrentRepData({ rep, findings, score });
 
-        // Auto-pause at rep start
         if (autoMode && rep.repNumber !== lastPausedRepRef.current && t < rep.startTime + 0.15) {
           lastPausedRepRef.current = rep.repNumber;
           pauseVideo();
         }
 
-        // Draw body color overlay FIRST (below skeleton)
         drawBodyOverlay(ctx, closest.landmarks, videoFit, score);
       } else {
         setCurrentRepData(null);
-        // Neutral gray overlay between reps
         drawBodyOverlay(ctx, closest.landmarks, videoFit, 2);
       }
 
-      // Draw skeleton on top
       drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
 
       animRef.current = requestAnimationFrame(draw);
@@ -634,130 +642,190 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
   const scoreColor = currentRepData ? (currentRepData.score >= 3 ? '#16C79A' : currentRepData.score >= 2 ? '#F5A623' : '#E94560') : null;
   const scoreLabel = currentRepData ? (currentRepData.score >= 3 ? 'Excelente' : currentRepData.score >= 2 ? 'Aceptable' : 'Mejorable') : null;
 
+  const hasSideBars = barWidths.left > 120 || barWidths.right > 120;
+
   return (
     <div>
-      {/* Single video, full width */}
-      <div className="bg-white rounded-3xl shadow-sm overflow-hidden">
-        <div className="relative">
-          <video
-            ref={feedbackRef}
-            src={videoURL}
-            controls
-            muted
-            className="w-full bg-black"
-            style={{ minHeight: '500px', maxHeight: '80vh', objectFit: 'contain' }}
-            onPlay={() => setIsPaused(false)}
-            onPause={() => setIsPaused(true)}
-          />
-          <canvas
-            ref={feedbackCanvasRef}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none"
-          />
+      <div ref={containerRef} className="rounded-3xl shadow-sm overflow-hidden relative bg-black">
+        <video
+          ref={feedbackRef}
+          src={videoURL}
+          controls
+          muted
+          className="w-full"
+          style={{ minHeight: '550px', maxHeight: '85vh', objectFit: 'contain' }}
+          onPlay={() => setIsPaused(false)}
+          onPause={() => setIsPaused(true)}
+        />
+        <canvas
+          ref={feedbackCanvasRef}
+          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+        />
 
-          {/* Small play hint when paused (bottom-right, not blocking) */}
-          {isPaused && autoMode && currentRepData && (
-            <button
-              onClick={playVideo}
-              className="absolute bottom-20 right-6 flex items-center gap-2 bg-white/90 hover:bg-white px-5 py-3 rounded-2xl shadow-lg transition-all hover:scale-105"
-            >
-              <span className="text-2xl">▶</span>
-              <span className="text-sm font-display font-bold text-ink">Continuar</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Findings panel below video */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Current rep feedback */}
-        <div className="bg-white rounded-3xl p-6 shadow-sm">
-          {currentRepData ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="font-display font-bold text-3xl text-ink">Rep {currentRepData.rep.repNumber}</span>
-                <span
-                  className="text-base font-bold px-4 py-1.5 rounded-full"
-                  style={{ color: scoreColor, backgroundColor: scoreColor + '18' }}
-                >
-                  {scoreLabel}
-                </span>
-              </div>
-
-              <p className="text-sm text-ink/50">
-                El color del cuerpo refleja tu desempeño: <span className="text-glow font-semibold">verde</span> = bien, <span style={{ color: '#F5A623' }} className="font-semibold">amarillo</span> = aceptable, <span className="text-accent font-semibold">rojo</span> = corregir
-              </p>
-
-              <div className="space-y-2">
-                {currentRepData.findings.map((f, i) => {
-                  const bg = f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623';
-                  const icon = f.type === 'good' ? '✓' : f.type === 'warn' ? '✗' : '!';
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 rounded-2xl px-5 py-4"
-                      style={{ backgroundColor: bg + '10', borderLeft: `4px solid ${bg}` }}
-                    >
-                      <span className="font-bold text-lg flex-shrink-0" style={{ color: bg }}>{icon}</span>
-                      <p className="text-sm text-ink/80 leading-relaxed">{f.text}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-xl text-ink/30 font-display">Dale play para comenzar</p>
-              <p className="text-sm text-ink/20 mt-2">El cuerpo se iluminará de acuerdo a tu desempeño en cada repetición</p>
-            </div>
-          )}
-        </div>
-
-        {/* Rep timeline */}
-        <div className="bg-white rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-semibold text-ink/60 uppercase tracking-wide">Repeticiones</p>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <span className="text-xs text-ink/40">Auto-pausa</span>
-              <div
-                className={`w-9 h-5 rounded-full relative transition-colors ${autoMode ? 'bg-accent' : 'bg-ink/20'}`}
-                onClick={() => setAutoMode(!autoMode)}
-              >
-                <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
-                  style={{ left: autoMode ? '18px' : '2px' }} />
-              </div>
-            </label>
-          </div>
-
-          <div className="grid grid-cols-4 sm:grid-cols-5 gap-3">
-            {repMetrics.map(rep => {
-              const { score, findings } = repInterpretation(rep, repMetrics);
-              const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
-              const label = score >= 3 ? 'Bien' : score >= 2 ? 'OK' : 'Corregir';
-              const isActive = currentRepData?.rep.repNumber === rep.repNumber;
-              return (
-                <button
-                  key={rep.repNumber}
-                  className={`text-center transition-all rounded-2xl p-3 ${isActive ? 'ring-2 ring-offset-1 scale-105' : 'hover:scale-105'}`}
-                  style={{ backgroundColor: color + '12', ringColor: color }}
-                  onClick={() => jumpToRep(rep)}
-                >
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white text-sm mx-auto mb-1.5"
-                    style={{ backgroundColor: color }}
+        {/* LEFT bar: Findings overlay */}
+        {hasSideBars && (
+          <div
+            className="absolute top-0 left-0 h-full overflow-y-auto pointer-events-auto"
+            style={{ width: `${Math.max(barWidths.left, barWidths.right)}px`, padding: '16px 12px' }}
+          >
+            {currentRepData ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-display font-bold text-2xl text-white">Rep {currentRepData.rep.repNumber}</span>
+                  <span
+                    className="text-xs font-bold px-3 py-1 rounded-full"
+                    style={{ color: scoreColor, backgroundColor: scoreColor + '30' }}
                   >
-                    {rep.repNumber}
-                  </div>
-                  <p className="text-xs font-semibold" style={{ color }}>{label}</p>
-                </button>
-              );
-            })}
-          </div>
+                    {scoreLabel}
+                  </span>
+                </div>
 
-          <p className="text-xs text-ink/30 mt-5">
-            Toca una rep para saltar a ella.
-          </p>
-        </div>
+                <div className="space-y-2">
+                  {currentRepData.findings.map((f, i) => {
+                    const bg = f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623';
+                    const icon = f.type === 'good' ? '✓' : f.type === 'warn' ? '✗' : '!';
+                    return (
+                      <div
+                        key={i}
+                        className="rounded-xl px-3 py-2.5"
+                        style={{ backgroundColor: bg + '20', borderLeft: `3px solid ${bg}` }}
+                      >
+                        <p className="text-xs text-white/90 leading-relaxed">
+                          <span className="font-bold mr-1" style={{ color: bg }}>{icon}</span>
+                          {f.text}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-white/30 text-sm text-center">Dale play para comenzar el análisis</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* RIGHT bar: Rep timeline overlay */}
+        {hasSideBars && (
+          <div
+            className="absolute top-0 right-0 h-full overflow-y-auto pointer-events-auto"
+            style={{ width: `${Math.max(barWidths.left, barWidths.right)}px`, padding: '16px 12px' }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-white/50 uppercase tracking-wide">Reps</p>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                <span className="text-[10px] text-white/30">Pausa</span>
+                <div
+                  className={`w-8 h-4 rounded-full relative transition-colors ${autoMode ? 'bg-accent' : 'bg-white/20'}`}
+                  onClick={() => setAutoMode(!autoMode)}
+                >
+                  <div className="w-3 h-3 rounded-full bg-white absolute top-0.5 transition-all"
+                    style={{ left: autoMode ? '17px' : '2px' }} />
+                </div>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {repMetrics.map(rep => {
+                const { score } = repInterpretation(rep, repMetrics);
+                const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+                const label = score >= 3 ? 'Bien' : score >= 2 ? 'OK' : 'Corregir';
+                const isActive = currentRepData?.rep.repNumber === rep.repNumber;
+                return (
+                  <button
+                    key={rep.repNumber}
+                    className={`text-center transition-all rounded-xl p-2 ${isActive ? 'ring-2 scale-105' : 'hover:scale-105'}`}
+                    style={{ backgroundColor: color + '20', ringColor: color }}
+                    onClick={() => jumpToRep(rep)}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs mx-auto mb-1"
+                      style={{ backgroundColor: color }}
+                    >
+                      {rep.repNumber}
+                    </div>
+                    <p className="text-[10px] font-semibold" style={{ color }}>{label}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Continuar button when paused */}
+        {isPaused && autoMode && currentRepData && (
+          <button
+            onClick={playVideo}
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white/90 hover:bg-white px-6 py-3 rounded-2xl shadow-lg transition-all hover:scale-105 pointer-events-auto"
+          >
+            <span className="text-xl">▶</span>
+            <span className="text-sm font-display font-bold text-ink">Continuar</span>
+          </button>
+        )}
       </div>
+
+      {/* Fallback: panels below video when no side bars (landscape video) */}
+      {!hasSideBars && (
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-3xl p-6 shadow-sm">
+            {currentRepData ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="font-display font-bold text-2xl text-ink">Rep {currentRepData.rep.repNumber}</span>
+                  <span className="text-sm font-bold px-3 py-1 rounded-full"
+                    style={{ color: scoreColor, backgroundColor: scoreColor + '18' }}>{scoreLabel}</span>
+                </div>
+                <div className="space-y-2">
+                  {currentRepData.findings.map((f, i) => {
+                    const bg = f.type === 'good' ? '#16C79A' : f.type === 'warn' ? '#E94560' : '#F5A623';
+                    const icon = f.type === 'good' ? '✓' : f.type === 'warn' ? '✗' : '!';
+                    return (
+                      <div key={i} className="flex items-start gap-2 rounded-xl px-4 py-3"
+                        style={{ backgroundColor: bg + '10', borderLeft: `4px solid ${bg}` }}>
+                        <span className="font-bold flex-shrink-0" style={{ color: bg }}>{icon}</span>
+                        <p className="text-sm text-ink/80 leading-relaxed">{f.text}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-ink/30 text-center py-6">Dale play para comenzar</p>
+            )}
+          </div>
+          <div className="bg-white rounded-3xl p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-ink/60 uppercase">Repeticiones</p>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-xs text-ink/40">Auto-pausa</span>
+                <div className={`w-9 h-5 rounded-full relative transition-colors ${autoMode ? 'bg-accent' : 'bg-ink/20'}`}
+                  onClick={() => setAutoMode(!autoMode)}>
+                  <div className="w-4 h-4 rounded-full bg-white absolute top-0.5 transition-all"
+                    style={{ left: autoMode ? '18px' : '2px' }} />
+                </div>
+              </label>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {repMetrics.map(rep => {
+                const { score } = repInterpretation(rep, repMetrics);
+                const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+                const label = score >= 3 ? 'Bien' : score >= 2 ? 'OK' : 'Corregir';
+                const isActive = currentRepData?.rep.repNumber === rep.repNumber;
+                return (
+                  <button key={rep.repNumber} className={`text-center transition-all rounded-xl p-2 ${isActive ? 'ring-2 scale-105' : 'hover:scale-105'}`}
+                    style={{ backgroundColor: color + '12', ringColor: color }} onClick={() => jumpToRep(rep)}>
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm mx-auto mb-1"
+                      style={{ backgroundColor: color }}>{rep.repNumber}</div>
+                    <p className="text-[10px] font-semibold" style={{ color }}>{label}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
