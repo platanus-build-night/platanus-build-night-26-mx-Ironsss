@@ -1,6 +1,6 @@
 # EasyFisio
 
-<img src="LogoEasyFisio.png" alt="EasyFisio Logo" width="500" />
+<img src="LogoEasyFisio.png" alt="EasyFisio Logo" width="800" />
 
 
 Biomechanical analysis of therapeutic exercises using computer vision. **100% client-side** — no servers, no API keys, everything runs in the browser.
