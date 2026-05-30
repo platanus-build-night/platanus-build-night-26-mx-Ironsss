@@ -1,5 +1,8 @@
 {
   "project-name": "EasyFisio",
-  "project-oneliner": "Biomechanical analysis of therapeutic exercises using computer vision — 100% in your browser",
-  "project-description": "Upload a video of a bicep curl and get 8 clinical metrics, automatic rep detection, interactive charts, and a movement quality radar profile. Powered by MediaPipe Pose, React, and Recharts. No servers, no API keys — everything runs client-side."
+  "project-oneliner": "Biomechanical analysis of therapeutic exercises using computer vision, 3D digital twin and FEA stress visualization — 100% in your browser",
+  "project-description": "Upload a video of a bicep curl and get 8 clinical metrics with automatic evaluation, adaptive rep detection, real-time skeleton overlay, a full-body 3D digital twin (Three.js), an FEA-style arm segment stress viewer with jet colormap, interactive time-series and per-rep charts, methodology documentation with LaTeX formulas, and session history. Powered by MediaPipe Pose Landmarker (WASM), React 18, Three.js, Recharts, and KaTeX. No servers, no API keys — everything runs 100% client-side in the browser.",
+  "project-deploy": "https://ironsss.github.io/easyfisio/",
+  "project-repo-mirror": "https://github.com/Ironsss/easyfisio",
+  "project-repo-original": "https://github.com/platanus-build-night/platanus-build-night-26-mx-Ironsss"
 }

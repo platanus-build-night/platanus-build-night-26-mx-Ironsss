@@ -1,76 +1,194 @@
-# EasyFisio
+<p align="center">
+  <img src="public/LogoEasyFisio.png" alt="EasyFisio Logo" width="400" />
+</p>
 
-<img src="LogoEasyFisio.png" alt="EasyFisio Logo" width="800" />
+<h3 align="center">Biomechanical analysis of therapeutic exercises using computer vision</h3>
 
+<p align="center">
+  <strong>100% client-side</strong> — no servers, no API keys, everything runs in the browser
+</p>
 
-Biomechanical analysis of therapeutic exercises using computer vision. **100% client-side** — no servers, no API keys, everything runs in the browser.
+<p align="center">
+  <a href="https://ironsss.github.io/easyfisio/">Live Demo</a> &nbsp;·&nbsp;
+  <a href="https://github.com/Ironsss/easyfisio">Deploy Repo</a> &nbsp;·&nbsp;
+  <a href="https://github.com/platanus-build-night/platanus-build-night-26-mx-Ironsss">Hackathon Repo (original)</a>
+</p>
 
-Hacker: **David Alexis Garcia Espinosa** ([@Ironsss](https://github.com/Ironsss))
+<p align="center">
+  <em>Proyecto creado en <strong>Platanus Build Night #26 MX</strong></em><br/>
+  Hacker: <strong>David Alexis Garcia Espinosa</strong> (<a href="https://github.com/Ironsss">@Ironsss</a>)
+</p>
+
+> **Nota sobre deploy:** El deploy en GitHub Pages se realizó en un [repo espejo](https://github.com/Ironsss/easyfisio) ya que la organización del hackathon no otorgaba permisos de admin suficientes para habilitar Pages. El código fuente es idéntico.
 
 ---
 
-## What it does
+## Qué hace
 
-Upload a video of a **bicep curl** and get:
+Sube un video de un **curl de bíceps** y obtén:
 
-- **8 clinical metrics** with automatic evaluation and actionable tips
-- **Adaptive rep detection** via elbow angle analysis
-- **Real-time skeleton overlay** with MediaPipe Pose annotations on your video
-- **Optimal value comparison** — see where you are vs where you should be
-- **Per-rep interpretation** — detailed findings for each repetition
-- **Interactive charts** — time series, per-rep breakdown, and radar profile
-- **Methodology tab** — every formula explained with LaTeX rendering (KaTeX)
-- **Session history** (localStorage + demo mode with 6-week progression)
+- **8 métricas clínicas** con evaluación automática y tips accionables
+- **Detección adaptativa de repeticiones** via análisis de ángulo del codo
+- **Skeleton overlay en tiempo real** con anotaciones de MediaPipe Pose sobre el video
+- **Digital Twin 3D** — réplica de cuerpo completo sincronizada con el video
+- **Visor de segmento FEA** — mapa de esfuerzo con jet colormap en el brazo activo
+- **Interpretación por rep** — hallazgos detallados para cada repetición (score + findings)
+- **Charts interactivos** — series de tiempo, desglose por rep, y perfil radar
+- **Pestaña de Metodología** — fórmulas en LaTeX (KaTeX), diagrama de arquitectura, tech stack
+- **Historial de sesiones** (localStorage + modo demo con progresión de 6 semanas)
 
-## Clinical Metrics
+---
 
-| Metric | What it measures | Optimal | Clinical use |
-|--------|-----------------|---------|-------------|
-| ROM | Elbow range of motion | 120–140° | Joint recovery |
-| Angular Velocity | Neuromuscular control | 40–80 °/s | Spasticity, power |
-| TUT | Time under tension | 3–5s/rep | Exercise dosage |
-| C:E Ratio | Concentric vs eccentric tempo | 0.4–0.7 | Tendinopathies |
-| Fatigue Index | ROM degradation across the set | < 10% | Load prescription |
-| Trunk Compensation | Torso lean angle | < 5° | Technique, excessive load |
-| CV (Consistency) | Variability between reps | < 5% | Motor control |
-| Hold Time | Pause at peak contraction | 0.5–2.0s | Isometric strength |
+## Arquitectura
 
-Full documentation with formulas and references: [`docs/CLINICAL_METRICS.md`](docs/CLINICAL_METRICS.md)
+```
+┌─────────────┐    ┌──────────────────┐    ┌───────────────────┐    ┌──────────────────┐    ┌─────────────┐
+│  Video Input │───▶│  Pose Detection  │───▶│  Analysis Engine  │───▶│  3D Digital Twin  │───▶│  Dashboard  │
+│  MP4 / WebM  │    │  MediaPipe Pose  │    │  Angles, reps,    │    │  Three.js         │    │  Recharts   │
+│  (browser)   │    │  Landmarker WASM │    │  clinical metrics │    │  Mannequin + FEA  │    │  React UI   │
+└─────────────┘    └──────────────────┘    └───────────────────┘    └──────────────────┘    └─────────────┘
+```
+
+### Pipeline de procesamiento
+
+```
+Video (frame-by-frame)
+  │
+  ▼
+MediaPipe Pose Landmarker (WASM + GPU)
+  │  33 landmarks por frame (x, y, z, visibility)
+  ▼
+Cálculo de ángulos
+  │  Ángulo del codo: arccos del producto punto entre vectores shoulder→elbow y wrist→elbow
+  │  Ángulo del tronco: desviación lateral del torso
+  ▼
+Detección de repeticiones
+  │  Análisis de picos/valles en la señal del ángulo del codo
+  │  Umbral adaptativo basado en la amplitud de la señal
+  ▼
+Métricas clínicas (8 métricas por rep y globales)
+  │  ROM, velocidad angular, TUT, ratio C:E, fatigue index,
+  │  compensación de tronco, consistencia (CV), hold time
+  ▼
+Visualización
+  ├── Skeleton overlay sobre video (Canvas 2D)
+  ├── Digital Twin 3D (Three.js — LatheGeometry, PBR materials, studio lighting)
+  ├── Visor FEA del brazo (BufferGeometry con vertex colors, jet colormap)
+  ├── Charts interactivos (Recharts — LineChart, BarChart, AreaChart, RadarChart)
+  └── Dashboard con interpretación por rep (score + findings + tips)
+```
+
+---
+
+## Métricas clínicas
+
+| Métrica | Qué mide | Óptimo | Uso clínico |
+|---------|----------|--------|-------------|
+| ROM | Rango de movimiento del codo | 120–140° | Recuperación articular |
+| Velocidad angular | Control neuromuscular | 40–80 °/s | Espasticidad, potencia |
+| TUT | Tiempo bajo tensión | 3–5s/rep | Dosificación del ejercicio |
+| Ratio C:E | Tempo concéntrico vs excéntrico | 0.4–0.7 | Tendinopatías |
+| Índice de fatiga | Degradación del ROM en la serie | < 10% | Prescripción de carga |
+| Compensación tronco | Inclinación lateral del torso | < 5° | Técnica, carga excesiva |
+| CV (Consistencia) | Variabilidad entre reps | < 5% | Control motor |
+| Hold Time | Pausa en contracción máxima | 0.5–2.0s | Fuerza isométrica |
+
+Documentación completa con fórmulas y referencias: [`docs/CLINICAL_METRICS.md`](docs/CLINICAL_METRICS.md)
+
+---
 
 ## Features
 
 ### Skeleton Overlay
-The analyzed video shows real-time MediaPipe Pose landmarks overlaid on playback:
-- **Active arm** highlighted in red with elbow angle displayed in real time
-- **Rest of body** shown in green (shoulders, torso, hips, legs)
-- Toggle on/off with the Skeleton button
+El video analizado muestra landmarks de MediaPipe Pose en tiempo real:
+- **Brazo activo** resaltado en rojo con ángulo del codo en tiempo real
+- **Resto del cuerpo** en verde (hombros, torso, caderas, piernas)
+- Toggle on/off con el botón de Skeleton
 
-### Per-Rep Interpretation
-Each repetition gets a score (Excellent/Acceptable/Improvable) with contextual findings:
-- ROM comparison vs set average
-- Trunk compensation assessment with correction advice
-- Tempo analysis (concentric vs eccentric)
-- Fatigue detection in late reps
-- Isometric hold evaluation
+### Digital Twin 3D
+Réplica de cuerpo completo renderizada en Three.js:
+- Geometría orgánica con LatheGeometry (bulge muscular)
+- Materiales PBR con iluminación de estudio (key + fill + rim + hemisphere)
+- Sombras suaves (PCFSoftShadowMap)
+- Brazo activo coloreado por score de la rep (verde/amarillo/rojo)
+- Etiqueta de ángulo del codo con sprite 3D
+- Controles de órbita + presets de cámara (Frontal, Lateral, 3/4, Espalda)
+- Sincronizado con la reproducción del video
 
-### Optimal Value Bars
-Every metric card shows a visual comparison bar: your current value vs the clinical optimal, with guidance on whether to increase or decrease.
+### Visor de Segmento FEA
+Vista de detalle del brazo con mapa de esfuerzo:
+- BufferGeometry con vertex colors (jet colormap: azul → verde → amarillo → rojo)
+- Wireframe overlay semitransparente
+- Puño modelado (palma + 4 dedos + pulgar)
+- Articulaciones en rosa para distinguir de los esfuerzos
+- Barra de color con escala de stress
 
-### Methodology Tab
-Full transparency on how every metric is calculated:
-- Step-by-step pipeline explanation (pose detection → angles → reps → metrics)
-- LaTeX-rendered formulas (KaTeX)
-- Reference ranges with color coding
-- Academic references for each metric
+### Interpretación por Rep
+Cada repetición recibe un score (Excelente / Aceptable / Mejorable) con hallazgos contextuales:
+- ROM vs promedio de la serie
+- Evaluación de compensación del tronco
+- Análisis de tempo (concéntrico vs excéntrico)
+- Detección de fatiga en reps tardías
+- Evaluación de hold isométrico
 
-## Stack
+### Charts interactivos
+- Series de tiempo: ángulo del codo, velocidad angular, compensación del tronco
+- Zonas de referencia coloreadas (verde = óptimo, amarillo = aceptable, rojo = corregir)
+- Marcadores de repeticiones con ReferenceLine
+- Texto explicativo debajo de cada chart ("Cómo leer")
 
-- **React 18** + **Vite 5** — fast builds, instant HMR
-- **MediaPipe Pose Landmarker** (WASM) — 33 landmarks, runs on browser GPU
-- **Recharts** — interactive, responsive charts
-- **KaTeX** — LaTeX formula rendering
-- **Tailwind CSS** (CDN) — responsive out of the box
-- **localStorage** — session history without a backend
+### Metodología
+- Diagrama de pipeline completo
+- Tech stack con versiones, licencias y uso de cada paquetería
+- Mapa de componentes del proyecto
+- Fórmulas renderizadas en LaTeX con KaTeX
+
+### Loading Spinner
+Anillo rotatorio de emojis de hueso durante el análisis del video
+
+---
+
+## Tech Stack
+
+| Tecnología | Versión | Licencia | Uso |
+|-----------|---------|----------|-----|
+| React | 18.3 | MIT | UI framework, componentes, estado |
+| Vite | 5.4 | MIT | Build tool, HMR, bundling |
+| MediaPipe Pose Landmarker | 0.10.18 | Apache 2.0 | Detección de pose (WASM + GPU) — 33 landmarks por frame |
+| Three.js | 0.184.0 | MIT | Motor 3D WebGL — Digital Twin (LatheGeometry, PBR) + visor FEA (BufferGeometry, vertex colors) |
+| Recharts | 2.12.7 | MIT | Charts interactivos (LineChart, BarChart, AreaChart, RadarChart) |
+| KaTeX | 0.16.11 | MIT | Renderizado de fórmulas LaTeX |
+| Tailwind CSS | CDN | MIT | Framework CSS utility-first |
+| Google Fonts | CDN | OFL | Plus Jakarta Sans, Inter, JetBrains Mono |
+
+---
+
+## Estructura del proyecto
+
+```
+src/
+├── main.jsx                        # Entry point — monta React en el DOM
+├── App.jsx                         # App principal: Upload, Processing, Dashboard,
+│                                   #   Feedback, TimeSeries, Reps, Methodology, History
+├── index.css                       # Estilos globales + animaciones
+├── analysis/
+│   └── engine.js                   # Motor de análisis: MediaPipe + ángulos + detección
+│                                   #   adaptativa de reps + 8 métricas clínicas
+├── components/
+│   ├── MannequinViewer.jsx         # Digital Twin 3D — cuerpo completo con LatheGeometry,
+│   │                               #   materiales PBR, sombras, iluminación de estudio
+│   └── ArmDetailViewer.jsx         # Visor FEA del brazo — BufferGeometry con vertex colors,
+│                                   #   jet colormap, wireframe overlay, puño modelado
+├── data/
+│   └── demoHistory.js              # Datos demo: 6 semanas de progresión de rehabilitación
+public/
+│   └── LogoEasyFisio.png           # Logo
+.github/
+│   └── workflows/
+│       └── deploy.yml              # GitHub Actions: build + deploy a GitHub Pages
+```
+
+---
 
 ## Quick Start
 
@@ -81,30 +199,22 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/rehab-motion/` in your browser.
+Abre `http://localhost:5173/easyfisio/` en tu navegador.
 
-## Deploy to GitHub Pages
+### Deploy
 
-1. Go to **Settings > Pages > Source** and select **GitHub Actions**
-2. Push to `main` — the workflow in `.github/workflows/deploy.yml` handles the rest
-
-## Architecture
-
-```
-src/
-├── main.jsx              # Entry point
-├── App.jsx               # Main app: upload, processing, dashboard, history, methodology
-├── index.css             # Global styles + animations
-├── analysis/
-│   └── engine.js         # Analysis engine: MediaPipe + angles + adaptive rep detection + metrics
-└── data/
-    └── demoHistory.js    # Demo data: 6-week rehabilitation progression
+```bash
+npm run deploy
 ```
 
-## Tips for recording videos
+Esto hace build con Vite y publica la carpeta `dist/` en la branch `gh-pages`.
 
-- Film from the **side** (lateral view) for best detection
-- Good **lighting** — avoid backlight
-- The active arm should be **fully visible**
-- **15-30 seconds** is enough for 8-12 reps
-- Use a tripod or prop your phone for stability
+---
+
+## Tips para grabar videos
+
+- Graba de **perfil** (vista lateral) para mejor detección
+- Buena **iluminación** — evita contraluz
+- El brazo activo debe ser **completamente visible**
+- **15-30 segundos** es suficiente para 8-12 reps
+- Usa trípode o apoya el celular para estabilidad
