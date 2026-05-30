@@ -557,7 +557,7 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
           {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
           {activeTab === 'reps' && <RepsTab repMetrics={repMetrics} />}
           {activeTab === 'timeseries' && <TimeseriesTab timeSeries={timeSeries} />}
-          {activeTab === 'methodology' && <MethodologyTab />}
+          {activeTab === 'methodology' && <MethodologyTab repMetrics={repMetrics} summary={summary} />}
         </div>
 
         {/* Right: sticky video panel with skeleton overlay (desktop only) */}
@@ -1168,8 +1168,97 @@ const METRICS_INFO = [
   },
 ];
 
-function MethodologyTab() {
+function buildExamples(repMetrics, summary) {
+  if (!repMetrics || repMetrics.length < 1) return {};
+  const r1 = repMetrics[0];
+  const rN = repMetrics[repMetrics.length - 1];
+  const n = repMetrics.length;
+
+  return {
+    0: { // ROM
+      rep1: `Rep 1: ángulo máx = ${r1.maxAngle}°, ángulo mín = ${r1.minAngle}° → ROM = ${r1.maxAngle}° − ${r1.minAngle}° = ${r1.rom}°`,
+      repN: `Rep ${rN.repNumber}: ángulo máx = ${rN.maxAngle}°, ángulo mín = ${rN.minAngle}° → ROM = ${rN.maxAngle}° − ${rN.minAngle}° = ${rN.rom}°`,
+      insight: r1.rom > rN.rom
+        ? `Tu ROM bajó ${Math.round((r1.rom - rN.rom) * 10) / 10}° entre la primera y última rep — señal de fatiga muscular.`
+        : r1.rom < rN.rom
+        ? `Tu ROM subió ${Math.round((rN.rom - r1.rom) * 10) / 10}° — posiblemente calentaste mejor conforme avanzó el set.`
+        : 'Tu ROM se mantuvo estable durante todo el set.',
+    },
+    1: { // Velocidad Angular
+      rep1: `Rep 1: velocidad pico = ${r1.peakVelocity} °/s, velocidad media = ${r1.meanVelocity} °/s`,
+      repN: `Rep ${rN.repNumber}: velocidad pico = ${rN.peakVelocity} °/s, velocidad media = ${rN.meanVelocity} °/s`,
+      insight: rN.meanVelocity < r1.meanVelocity * 0.8
+        ? `La velocidad bajó un ${Math.round((1 - rN.meanVelocity / r1.meanVelocity) * 100)}% al final — tu sistema neuromuscular se fatigó.`
+        : 'La velocidad se mantuvo consistente durante el set — buen control neuromuscular.',
+    },
+    2: { // TUT
+      rep1: `Rep 1: duró ${r1.tut}s (concéntrica ${r1.tConcentric}s + excéntrica ${r1.tEccentric}s)`,
+      repN: `Rep ${rN.repNumber}: duró ${rN.tut}s (concéntrica ${rN.tConcentric}s + excéntrica ${rN.tEccentric}s)`,
+      insight: `TUT total del set: ${summary.totalTUT}s en ${n} reps = promedio de ${summary.meanTUT}s por rep. ${summary.meanTUT >= 3 ? 'Buen rango para hipertrofia.' : 'Intenta hacer cada rep más lenta para mayor estímulo.'}`,
+    },
+    3: { // Ratio C:E
+      rep1: `Rep 1: subida ${r1.tConcentric}s ÷ bajada ${r1.tEccentric}s = ratio ${r1.ceRatio}`,
+      repN: `Rep ${rN.repNumber}: subida ${rN.tConcentric}s ÷ bajada ${rN.tEccentric}s = ratio ${rN.ceRatio}`,
+      insight: r1.ceRatio <= 0.7
+        ? 'Buen control excéntrico — la bajada es más lenta que la subida, lo que maximiza el estímulo.'
+        : 'La bajada es rápida respecto a la subida. Intenta bajar en el doble de tiempo que subes (ratio ~0.5).',
+    },
+    4: { // Fatiga
+      rep1: (() => {
+        const nF = Math.min(3, Math.floor(n / 2));
+        const first3 = repMetrics.slice(0, nF).map(r => r.rom);
+        const last3 = repMetrics.slice(-nF).map(r => r.rom);
+        const avgFirst = Math.round(first3.reduce((a, b) => a + b, 0) / first3.length * 10) / 10;
+        const avgLast = Math.round(last3.reduce((a, b) => a + b, 0) / last3.length * 10) / 10;
+        return `Promedio ROM primeras ${nF}: ${avgFirst}° | Promedio ROM últimas ${nF}: ${avgLast}°`;
+      })(),
+      repN: `Índice de fatiga = (${(() => {
+        const nF = Math.min(3, Math.floor(n / 2));
+        const first3 = repMetrics.slice(0, nF).map(r => r.rom);
+        const last3 = repMetrics.slice(-nF).map(r => r.rom);
+        const avgFirst = Math.round(first3.reduce((a, b) => a + b, 0) / first3.length * 10) / 10;
+        const avgLast = Math.round(last3.reduce((a, b) => a + b, 0) / last3.length * 10) / 10;
+        return `${avgFirst}° − ${avgLast}°) ÷ ${avgFirst}°`;
+      })()} × 100 = ${summary.fatigueIndexROM}%`,
+      insight: summary.fatigueIndexROM < 10
+        ? 'Fatiga mínima — la carga es apropiada para tu nivel.'
+        : summary.fatigueIndexROM < 25
+        ? 'Fatiga moderada — estás cerca de tu límite, lo cual es bueno para progresar.'
+        : 'Fatiga alta — considera reducir el peso o las repeticiones.',
+    },
+    5: { // Trunk Compensation
+      rep1: `Rep 1: inclinación máxima del tronco = ${r1.maxTrunkLean}°`,
+      repN: `Rep ${rN.repNumber}: inclinación máxima del tronco = ${rN.maxTrunkLean}°`,
+      insight: rN.maxTrunkLean > r1.maxTrunkLean + 3
+        ? `Tu compensación aumentó ${Math.round((rN.maxTrunkLean - r1.maxTrunkLean) * 10) / 10}° del inicio al final — conforme te cansas, usas más impulso del cuerpo.`
+        : 'Tu postura se mantuvo estable durante el set — buena activación del core.',
+    },
+    6: { // CV
+      rep1: (() => {
+        const roms = repMetrics.map(r => r.rom);
+        const avg = Math.round(roms.reduce((a, b) => a + b, 0) / roms.length * 10) / 10;
+        return `ROMs de tus ${n} reps: [${roms.join('°, ')}°] → promedio = ${avg}°`;
+      })(),
+      repN: `Desviación estándar = ${summary.stdROM}° → CV = ${summary.stdROM}° ÷ ${summary.meanROM}° × 100 = ${summary.cvROM}%`,
+      insight: summary.cvROM < 5
+        ? 'Alta consistencia — tus reps son casi idénticas. Excelente control motor.'
+        : summary.cvROM < 15
+        ? 'Variabilidad normal — cada rep difiere un poco, lo cual es esperable.'
+        : 'Tus reps varían bastante entre sí. Enfócate en hacer cada movimiento igual.',
+    },
+    7: { // Hold Time
+      rep1: `Rep 1: mantuviste la contracción máxima por ${r1.holdTime}s`,
+      repN: `Rep ${rN.repNumber}: mantuviste la contracción máxima por ${rN.holdTime}s`,
+      insight: r1.holdTime >= 0.5
+        ? 'Buena pausa isométrica — estás maximizando la activación en el pico de contracción.'
+        : 'No hay pausa significativa en el pico. Intenta sostener 1-2 segundos arriba para mayor activación.',
+    },
+  };
+}
+
+function MethodologyTab({ repMetrics, summary }) {
   const [openMetric, setOpenMetric] = useState(null);
+  const examples = buildExamples(repMetrics, summary);
 
   return (
     <div className="space-y-3">
@@ -1240,6 +1329,20 @@ function MethodologyTab() {
                     ))}
                   </div>
                 </div>
+
+                {/* Worked example with real data */}
+                {examples[i] && (
+                  <div className="bg-glow/5 border border-glow/20 rounded-lg p-4 space-y-2">
+                    <p className="text-[10px] font-medium text-glow uppercase tracking-wide mb-2">Ejemplo con tus datos</p>
+                    <div className="space-y-1.5 text-sm font-mono">
+                      <p className="text-ink/80 bg-white/60 rounded px-2 py-1">{examples[i].rep1}</p>
+                      <p className="text-ink/80 bg-white/60 rounded px-2 py-1">{examples[i].repN}</p>
+                    </div>
+                    <p className="text-sm text-ink/70 leading-relaxed mt-2 pt-2 border-t border-glow/15">
+                      {examples[i].insight}
+                    </p>
+                  </div>
+                )}
 
                 {/* Ranges */}
                 <div>
