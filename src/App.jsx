@@ -7,6 +7,7 @@ import {
 import { processVideo, assessMetric, saveSession, getHistory } from './analysis/engine';
 import { DEMO_HISTORY, getProgressionData } from './data/demoHistory';
 import MannequinViewer from './components/MannequinViewer';
+import ArmDetailViewer from './components/ArmDetailViewer';
 
 // ════════════════════════════════════════════════
 // LATEX COMPONENT
@@ -834,7 +835,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
       {frameLandmarks?.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center gap-3 mb-3">
-            <h3 className="font-display text-lg font-bold text-ink">Digital Twin 3D</h3>
+            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Cuerpo Completo</h3>
             <span className="text-xs text-ink/30">Arrastra para rotar • Scroll para zoom</span>
           </div>
           <MannequinViewer
@@ -843,6 +844,63 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
             repMetrics={repMetrics}
             currentTime={videoTime}
             getRepScore={getRepScore}
+          />
+
+          {/* Shared playback controls for mannequin */}
+          <div className="bg-white rounded-2xl p-3 shadow-sm mt-3">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => isPaused ? playVideo() : pauseVideo()}
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-ink text-white hover:bg-ink/80 transition-colors text-sm"
+              >
+                {isPaused ? '\u25B6' : '\u23F8'}
+              </button>
+              <input
+                type="range" min={0}
+                max={frameLandmarks[frameLandmarks.length - 1]?.timestamp || 1}
+                step={0.01} value={videoTime}
+                onChange={e => { if (feedbackRef.current) feedbackRef.current.currentTime = +e.target.value; }}
+                className="flex-1 accent-accent"
+              />
+              <span className="font-mono text-[10px] text-ink/40 w-14 text-right">{videoTime.toFixed(1)}s</span>
+            </div>
+            <div className="flex items-center gap-1 mt-2">
+              <span className="text-[10px] text-ink/30 mr-1">Reps:</span>
+              {repMetrics.map(rep => {
+                const score = getRepScore ? getRepScore(rep.repNumber) : 2;
+                const color = score >= 3 ? '#16C79A' : score >= 2 ? '#F5A623' : '#E94560';
+                const isActive = currentRepData?.rep.repNumber === rep.repNumber;
+                return (
+                  <button key={rep.repNumber}
+                    onClick={() => jumpToRep(rep)}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white transition-all ${isActive ? 'ring-2 ring-ink scale-110' : 'hover:scale-110'}`}
+                    style={{ backgroundColor: color }}>
+                    {rep.repNumber}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Segment Detail — FEA arm stress view */}
+      {frameLandmarks?.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center gap-3 mb-3">
+            <h3 className="font-display text-lg font-bold text-ink">Análisis de Segmento — Brazo {activeSide === 'left' ? 'Izquierdo' : 'Derecho'}</h3>
+            <span className="text-xs text-ink/30">Mapa de esfuerzo muscular tipo elemento finito</span>
+          </div>
+          <ArmDetailViewer
+            frameLandmarks={frameLandmarks}
+            activeSide={activeSide}
+            repMetrics={repMetrics}
+            currentTime={videoTime}
+            getRepScore={getRepScore}
+            isPaused={isPaused}
+            onPlay={playVideo}
+            onPause={pauseVideo}
+            onSeek={(t) => { if (feedbackRef.current) feedbackRef.current.currentTime = t; }}
           />
         </div>
       )}
