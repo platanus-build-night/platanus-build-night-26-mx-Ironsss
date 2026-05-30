@@ -85,7 +85,7 @@ export default function App() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-ink text-white px-4 py-3 flex items-center justify-between">
         <button onClick={() => setView('upload')} className="flex items-center gap-2">
-          <span className="text-accent text-xl font-bold font-display">EF</span>
+          <img src={import.meta.env.BASE_URL + 'LogoEasyFisio.png'} alt="EasyFisio" className="h-8 w-8 rounded-full object-cover" />
           <span className="font-display text-lg hidden sm:inline">EasyFisio</span>
         </button>
         <div className="flex items-center gap-3">
