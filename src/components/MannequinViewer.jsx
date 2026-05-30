@@ -124,6 +124,7 @@ export default function MannequinViewer({
   currentTime,
   getRepScore,
   currentRepData,
+  idealMode = false,
 }) {
   const containerRef = useRef(null);
   const stateRef = useRef(null); // holds all Three.js objects
@@ -161,9 +162,12 @@ export default function MannequinViewer({
       st.head.position.copy(data.HEAD_CENTER);
     }
 
-    // Color active arm based on rep score
+    // Color active arm based on rep score (or always green in ideal mode)
     const rep = getRepAtTime(t);
-    if (rep && getRepScore) {
+    if (idealMode) {
+      st.matActiveArm.color.setHex(0x16C79A);
+      st.matActiveArm.emissive.setHex(0x16C79A);
+    } else if (rep && getRepScore) {
       const score = getRepScore(rep.repNumber);
       const color = scoreToHex(score);
       st.matActiveArm.color.setHex(color);
@@ -191,7 +195,7 @@ export default function MannequinViewer({
       const { sprite, ctx, texture } = st.label;
       ctx.clearRect(0, 0, 160, 80);
       const repScore = rep && getRepScore ? getRepScore(rep.repNumber) : 0;
-      ctx.fillStyle = scoreToCSS(repScore);
+      ctx.fillStyle = idealMode ? '#16C79A' : scoreToCSS(repScore);
       ctx.beginPath();
       ctx.roundRect(4, 4, 152, 72, 16);
       ctx.fill();
@@ -209,7 +213,7 @@ export default function MannequinViewer({
         sprite.position.y += 0.12;
       }
     }
-  }, [frameLandmarks, activeSide, getRepAtTime, getRepScore]);
+  }, [frameLandmarks, activeSide, getRepAtTime, getRepScore, idealMode]);
 
   // ── Initialize Three.js scene ──
   useEffect(() => {
@@ -416,23 +420,33 @@ export default function MannequinViewer({
         <div
           ref={containerRef}
           className="w-full bg-ink rounded-2xl overflow-hidden"
-          style={{ height: '450px', touchAction: 'none' }}
+          style={{ height: '380px', touchAction: 'none' }}
         />
 
-        {currentRep && (
-          <div
-            className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-xl"
-            style={{ backgroundColor: scoreColorHex + '30', backdropFilter: 'blur(8px)' }}
-          >
-            <span className="font-display font-bold text-white text-base">Rep {currentRep.repNumber}</span>
-            <span
-              className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-              style={{ color: scoreColorHex, backgroundColor: scoreColorHex + '40' }}
-            >
-              {scoreLabelText}
+        <div className="absolute top-3 left-3 flex items-center gap-2">
+          {idealMode && (
+            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider"
+              style={{ backgroundColor: '#16C79A30', color: '#16C79A', backdropFilter: 'blur(8px)' }}>
+              Ideal
             </span>
-          </div>
-        )}
+          )}
+          {!idealMode && currentRep && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
+              style={{ backgroundColor: scoreColorHex + '30', backdropFilter: 'blur(8px)' }}>
+              <span className="font-display font-bold text-white text-base">Rep {currentRep.repNumber}</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                style={{ color: scoreColorHex, backgroundColor: scoreColorHex + '40' }}>
+                {scoreLabelText}
+              </span>
+            </div>
+          )}
+          {!idealMode && !currentRep && (
+            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider"
+              style={{ backgroundColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', backdropFilter: 'blur(8px)' }}>
+              Real
+            </span>
+          )}
+        </div>
 
         <div className="absolute top-3 right-3 flex gap-1">
           {[
@@ -451,8 +465,8 @@ export default function MannequinViewer({
           ))}
         </div>
 
-        {/* Rep findings overlay */}
-        {currentRepData && (
+        {/* Rep findings overlay (only on real twin) */}
+        {currentRepData && !idealMode && (
           <div className="absolute bottom-3 left-3 right-3 max-h-[40%] overflow-y-auto"
             style={{ pointerEvents: 'none' }}>
             <div className="space-y-1">

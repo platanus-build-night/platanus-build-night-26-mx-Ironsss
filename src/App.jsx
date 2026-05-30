@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -560,6 +560,84 @@ function drawBodyOverlay(ctx, lm, videoFit, score) {
   ctx.globalAlpha = 1.0;
 }
 
+// ─── Generate ideal-form landmarks for the "good twin" ───
+function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
+  if (!frameLandmarks?.length || !repMetrics?.length) return frameLandmarks;
+
+  const shIdx = activeSide === 'left' ? 11 : 12;
+  const elIdx = activeSide === 'left' ? 13 : 14;
+  const wrIdx = activeSide === 'left' ? 15 : 16;
+  const hipL = 23, hipR = 24;
+
+  return frameLandmarks.map(frame => {
+    const lm = frame.landmarks.map(l => ({ ...l }));
+    const t = frame.timestamp;
+    const rep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
+
+    // Straighten trunk: average hip midpoint Y with shoulder midpoint Y to reduce lean
+    const midShY = (lm[11].y + lm[12].y) / 2;
+    const midHipY = (lm[hipL].y + lm[hipR].y) / 2;
+    const midShX = (lm[11].x + lm[12].x) / 2;
+    const midHipX = (lm[hipL].x + lm[hipR].x) / 2;
+    const trunkLean = midShX - midHipX;
+    // Shift shoulders to be directly above hips
+    lm[11].x -= trunkLean;
+    lm[12].x -= trunkLean;
+    lm[shIdx].x -= trunkLean;
+
+    // Compute upper arm & forearm lengths from original data
+    const origSh = frame.landmarks[shIdx];
+    const origEl = frame.landmarks[elIdx];
+    const origWr = frame.landmarks[wrIdx];
+    const upperLen = Math.sqrt((origEl.x - origSh.x) ** 2 + (origEl.y - origSh.y) ** 2);
+    const foreLen = Math.sqrt((origWr.x - origEl.x) ** 2 + (origWr.y - origEl.y) ** 2);
+
+    if (rep) {
+      const repDur = rep.endTime - rep.startTime;
+      const progress = Math.max(0, Math.min(1, (t - rep.startTime) / repDur));
+
+      // Ideal curl: smooth sine — 0→0.40 concentric, 0.40→0.50 hold, 0.50→1.0 eccentric (slower)
+      let angleNorm; // 0 = fully flexed, 1 = extended
+      if (progress < 0.40) {
+        angleNorm = Math.cos((progress / 0.40) * Math.PI) * 0.5 + 0.5; // 1→0
+      } else if (progress < 0.50) {
+        angleNorm = 0; // isometric hold at peak
+      } else {
+        angleNorm = (1 - Math.cos(((progress - 0.50) / 0.50) * Math.PI)) * 0.5; // 0→1
+      }
+
+      const idealAngleRad = ((30 + angleNorm * 130) * Math.PI) / 180; // 30°–160°
+
+      // Upper arm hangs straight down from shoulder
+      const sh = lm[shIdx];
+      lm[elIdx].x = sh.x;
+      lm[elIdx].y = sh.y + upperLen;
+      lm[elIdx].z = sh.z || 0;
+
+      // Forearm rotates around elbow at ideal angle
+      const el = lm[elIdx];
+      // Angle measured from upper arm vector (pointing down) — 0° means folded up
+      // The vector from elbow to shoulder is (0, -1) (up)
+      // We rotate the wrist direction from that by idealAngle
+      const sign = activeSide === 'left' ? -1 : 1;
+      lm[wrIdx].x = el.x + sign * Math.sin(idealAngleRad) * foreLen;
+      lm[wrIdx].y = el.y + Math.cos(idealAngleRad) * foreLen;
+      lm[wrIdx].z = el.z || 0;
+    } else {
+      // Between reps: resting position — arm hanging extended
+      const sh = lm[shIdx];
+      lm[elIdx].x = sh.x;
+      lm[elIdx].y = sh.y + upperLen;
+      lm[elIdx].z = sh.z || 0;
+      lm[wrIdx].x = lm[elIdx].x;
+      lm[wrIdx].y = lm[elIdx].y + foreLen;
+      lm[wrIdx].z = lm[elIdx].z || 0;
+    }
+
+    return { ...frame, landmarks: lm };
+  });
+}
+
 function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalReps, duration, getRepScore }) {
   const feedbackRef = useRef(null);
   const feedbackCanvasRef = useRef(null);
@@ -571,6 +649,11 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
   const [autoMode, setAutoMode] = useState(true);
   const [barWidths, setBarWidths] = useState({ left: 0, right: 0 });
   const [videoTime, setVideoTime] = useState(0);
+
+  const idealLandmarks = useMemo(
+    () => generateIdealLandmarks(frameLandmarks, repMetrics, activeSide),
+    [frameLandmarks, repMetrics, activeSide]
+  );
 
   const playVideo = useCallback(() => {
     feedbackRef.current?.play();
@@ -831,23 +914,39 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
         </div>
       )}
 
-      {/* Digital Twin 3D — below video */}
+      {/* Digital Twin 3D — Real vs Ideal side by side */}
       {frameLandmarks?.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center gap-3 mb-3">
-            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Cuerpo Completo</h3>
-            <span className="text-xs text-ink/30">Arrastra para rotar • Scroll para zoom</span>
+            <h3 className="font-display text-lg font-bold text-ink">Digital Twin — Real vs Ideal</h3>
+            <span className="text-xs text-ink/30">Compara tu ejecucion con la forma perfecta</span>
           </div>
-          <MannequinViewer
-            frameLandmarks={frameLandmarks}
-            activeSide={activeSide}
-            repMetrics={repMetrics}
-            currentTime={videoTime}
-            getRepScore={getRepScore}
-            currentRepData={currentRepData}
-          />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {/* Real twin */}
+            <div>
+              <MannequinViewer
+                frameLandmarks={frameLandmarks}
+                activeSide={activeSide}
+                repMetrics={repMetrics}
+                currentTime={videoTime}
+                getRepScore={getRepScore}
+                currentRepData={currentRepData}
+              />
+            </div>
+            {/* Ideal twin */}
+            <div>
+              <MannequinViewer
+                frameLandmarks={idealLandmarks}
+                activeSide={activeSide}
+                repMetrics={repMetrics}
+                currentTime={videoTime}
+                getRepScore={getRepScore}
+                idealMode
+              />
+            </div>
+          </div>
 
-          {/* Shared playback controls for mannequin */}
+          {/* Shared playback controls */}
           <div className="bg-white rounded-2xl p-3 shadow-sm mt-3">
             <div className="flex items-center gap-3">
               <button
