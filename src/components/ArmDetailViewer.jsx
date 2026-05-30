@@ -352,24 +352,23 @@ export default function ArmDetailViewer({
     const wristSph = new THREE.Mesh(new THREE.SphereGeometry(0.024, 16, 12), jMat);
     scene.add(shoulderSph, elbowSph, wristSph);
 
-    // Fist (palm + fingers) at wrist
+    // Fist (palm + fingers) at wrist — sized to match forearm end diameter
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xD4A574, roughness: 0.6, metalness: 0.02 });
-    const palmGeo = new THREE.BoxGeometry(0.038, 0.030, 0.025);
-    palmGeo.translate(0, 0, 0);
+    const palmGeo = new THREE.BoxGeometry(0.052, 0.045, 0.038);
     const palmMesh = new THREE.Mesh(palmGeo, skinMat);
     scene.add(palmMesh);
 
     // 4 finger cylinders curled into a fist
-    const fingerGeo = new THREE.CylinderGeometry(0.006, 0.005, 0.028, 8);
+    const fingerGeo = new THREE.CylinderGeometry(0.009, 0.008, 0.040, 8);
     const fingers = [];
-    const fingerOffsets = [-0.012, -0.004, 0.004, 0.012]; // spread across palm width
+    const fingerOffsets = [-0.016, -0.006, 0.006, 0.016];
     for (const xOff of fingerOffsets) {
       const finger = new THREE.Mesh(fingerGeo, skinMat);
       scene.add(finger);
       fingers.push({ mesh: finger, xOff });
     }
     // Thumb (slightly thicker, offset to side)
-    const thumbGeo = new THREE.CylinderGeometry(0.007, 0.006, 0.022, 8);
+    const thumbGeo = new THREE.CylinderGeometry(0.010, 0.009, 0.032, 8);
     const thumbMesh = new THREE.Mesh(thumbGeo, skinMat);
     scene.add(thumbMesh);
 
@@ -484,28 +483,27 @@ export default function ArmDetailViewer({
 
     // Fist at wrist — oriented along forearm direction
     const foreDir = new THREE.Vector3().subVectors(wrW, elW).normalize();
-    const fistOffset = foreDir.clone().multiplyScalar(0.025);
+    const fistOffset = foreDir.clone().multiplyScalar(0.035);
     const fistCenter = wrW.clone().add(fistOffset);
     st.palmMesh.position.copy(fistCenter);
     const fistQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), foreDir);
     st.palmMesh.quaternion.copy(fistQuat);
 
-    // Fingers curl toward palm (perpendicular to forearm, curled inward)
-    const fingerDir = foreDir.clone().multiplyScalar(0.018);
+    // Fingers curl toward palm (extend along forearm direction)
+    const fingerAdv = foreDir.clone().multiplyScalar(0.028);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(fistQuat);
     for (const f of st.fingers) {
       const fingerPos = fistCenter.clone()
-        .add(fingerDir)
+        .add(fingerAdv)
         .add(right.clone().multiplyScalar(f.xOff));
       f.mesh.position.copy(fingerPos);
       f.mesh.quaternion.copy(fistQuat);
     }
     // Thumb on the side
     const thumbPos = fistCenter.clone()
-      .sub(right.clone().multiplyScalar(activeSide === 'left' ? -0.022 : 0.022))
-      .add(foreDir.clone().multiplyScalar(0.005));
+      .sub(right.clone().multiplyScalar(activeSide === 'left' ? -0.032 : 0.032))
+      .add(foreDir.clone().multiplyScalar(0.006));
     st.thumbMesh.position.copy(thumbPos);
-    // Thumb rotated 90° from fingers
     const thumbQuat = fistQuat.clone();
     const thumbRot = new THREE.Quaternion().setFromAxisAngle(foreDir, Math.PI * 0.5);
     thumbQuat.multiply(thumbRot);
