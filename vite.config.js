@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  base: '/rehab-motion/',
+  base: '/platanus-build-night-26-mx-Ironsss/',
   build: {
     outDir: 'dist',
     sourcemap: false
