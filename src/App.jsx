@@ -142,28 +142,28 @@ function UploadView({ onFileSelect, onDrop, fileInputRef }) {
   const [dragOver, setDragOver] = useState(false);
 
   return (
-    <div className="max-w-lg mx-auto px-4 pt-12 pb-20">
-      <div className="text-center mb-10">
-        <h1 className="font-display text-4xl sm:text-5xl text-ink mb-3">
+    <div className="max-w-2xl mx-auto px-6 pt-16 pb-24">
+      <div className="text-center mb-12">
+        <h1 className="font-display text-5xl sm:text-6xl text-ink mb-4 font-extrabold leading-tight">
           Análisis de<br /><span className="text-accent">Movimiento</span>
         </h1>
-        <p className="text-ink/60 text-sm max-w-sm mx-auto">
+        <p className="text-ink/60 text-lg max-w-md mx-auto leading-relaxed">
           Sube un video de flexión de bíceps y obtén métricas biomecánicas clínicas al instante.
-          Sin servidores — todo se procesa en tu dispositivo.
+          Todo se procesa en tu dispositivo.
         </p>
       </div>
 
       <div
-        className={`upload-zone rounded-2xl p-10 text-center cursor-pointer ${dragOver ? 'drag-over' : ''}`}
+        className={`upload-zone rounded-3xl p-14 text-center cursor-pointer ${dragOver ? 'drag-over' : ''}`}
         onClick={() => fileInputRef.current?.click()}
         onDrop={(e) => { setDragOver(false); onDrop(e); }}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
       >
-        <div className="text-5xl mb-4">🎬</div>
-        <p className="font-medium text-ink/80 mb-1">Arrastra tu video aquí</p>
-        <p className="text-sm text-ink/50">o toca para seleccionar</p>
-        <p className="text-xs text-ink/40 mt-4">MP4, MOV, WebM • Máx 200MB</p>
+        <div className="text-7xl mb-5">🎬</div>
+        <p className="font-display font-bold text-xl text-ink/80 mb-2">Arrastra tu video aquí</p>
+        <p className="text-base text-ink/50">o toca para seleccionar</p>
+        <p className="text-sm text-ink/40 mt-5">MP4, MOV, WebM • Máx 200MB</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -173,16 +173,25 @@ function UploadView({ onFileSelect, onDrop, fileInputRef }) {
         />
       </div>
 
-      {/* Exercise info */}
-      <div className="mt-8 bg-white rounded-2xl p-5 shadow-sm">
-        <h3 className="font-display text-lg mb-2">Ejercicio: Flexión de Bíceps</h3>
-        <p className="text-sm text-ink/60 mb-3">
-          Graba el ejercicio preferentemente de perfil (vista lateral) con buena iluminación.
-          El análisis detectará automáticamente el brazo activo.
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          {['ROM', 'Velocidad', 'Fatiga', 'Compensación', 'Tempo'].map(tag => (
-            <span key={tag} className="text-xs bg-mint/10 text-mint px-2.5 py-1 rounded-full">
+      {/* Tips */}
+      <div className="mt-10 bg-white rounded-3xl p-7 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-4">Tips para mejor resultado</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[
+            { icon: '📐', text: 'Graba de perfil (vista lateral)' },
+            { icon: '💡', text: 'Buena iluminación, evita contraluz' },
+            { icon: '💪', text: 'Brazo activo completamente visible' },
+            { icon: '📱', text: 'Usa trípode o apoya el celular' },
+          ].map(tip => (
+            <div key={tip.text} className="flex items-start gap-3 bg-bone rounded-xl p-4">
+              <span className="text-2xl flex-shrink-0">{tip.icon}</span>
+              <p className="text-sm text-ink/70 leading-relaxed">{tip.text}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 flex-wrap mt-5">
+          {['ROM', 'Velocidad', 'Fatiga', 'Compensación', 'Tempo', 'Consistencia', 'Hold Isométrico', 'Ratio C:E'].map(tag => (
+            <span key={tag} className="text-xs font-medium bg-mint/10 text-mint px-3 py-1.5 rounded-full">
               {tag}
             </span>
           ))}
@@ -494,37 +503,64 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
 // ════════════════════════════════════════════════
 // DASHBOARD VIEW
 // ════════════════════════════════════════════════
+function computeGlobalScore(summary) {
+  const scores = [
+    Math.min(100, (summary.meanROM / 140) * 100),
+    Math.max(0, 100 - summary.cvROM * 3),
+    Math.min(100, Math.max(0, (1 - Math.abs(summary.meanCERatio - 0.55) * 1.5) * 100)),
+    Math.max(0, 100 - summary.fatigueIndexROM * 2),
+    Math.max(0, 100 - summary.meanTrunkCompensation * 5),
+    Math.min(100, summary.meanHoldTime * 100),
+  ];
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
 function DashboardView({ results, videoURL, onNewAnalysis }) {
   const { summary, repMetrics, timeSeries, totalReps, activeSide, duration, frameLandmarks } = results;
   const [activeTab, setActiveTab] = useState('overview');
 
+  const globalScore = computeGlobalScore(summary);
+  const scoreColor = globalScore >= 75 ? '#16C79A' : globalScore >= 50 ? '#F5A623' : '#E94560';
+  const scoreLabel = globalScore >= 75 ? 'Excelente' : globalScore >= 50 ? 'Bueno' : 'Mejorable';
+
   const tabs = [
     { id: 'overview', label: 'Resumen' },
     { id: 'reps', label: 'Por Rep' },
-    { id: 'timeseries', label: 'Serie Temporal' },
+    { id: 'timeseries', label: 'Gráficas' },
     { id: 'methodology', label: 'Metodología' },
   ];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 pb-24">
+    <div className="max-w-7xl mx-auto px-6 py-8 pb-24">
       {/* Summary header — full width */}
-      <div className="bg-ink text-white rounded-2xl p-5 mb-6">
-        <div className="flex justify-between items-start mb-4">
+      <div className="bg-ink text-white rounded-3xl p-7 mb-8">
+        <div className="flex justify-between items-start mb-5">
           <div>
-            <h2 className="font-display text-2xl">Flexión de Bíceps</h2>
-            <p className="text-white/50 text-sm mt-1">
+            <h2 className="font-display text-3xl font-bold">Flexión de Bíceps</h2>
+            <p className="text-white/50 text-base mt-1">
               {totalReps} repeticiones • Brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} • {Math.round(duration)}s
             </p>
           </div>
           <button
             onClick={onNewAnalysis}
-            className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full transition-colors"
+            className="text-sm font-medium bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition-colors"
           >
-            + Nuevo
+            + Nuevo análisis
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        {/* Global score + quick stats */}
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-white/10 rounded-2xl p-5 flex flex-col items-center justify-center">
+            <div
+              className="text-5xl font-display font-extrabold mb-1"
+              style={{ color: scoreColor }}
+            >
+              {globalScore}
+            </div>
+            <p className="text-sm font-medium" style={{ color: scoreColor }}>{scoreLabel}</p>
+            <p className="text-white/40 text-xs mt-1">Score global</p>
+          </div>
           <QuickStat label="ROM medio" value={`${summary.meanROM}°`} assessment={assessMetric('rom', summary.meanROM)} />
           <QuickStat label="Fatiga" value={`${summary.fatigueIndexROM}%`} assessment={assessMetric('fatigueROM', summary.fatigueIndexROM)} />
           <QuickStat label="Consistencia" value={`CV ${summary.cvROM}%`} assessment={assessMetric('cvROM', summary.cvROM)} />
@@ -532,18 +568,18 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
       </div>
 
       {/* Two-column layout: metrics left, video right */}
-      <div className="flex gap-6 items-start">
+      <div className="flex gap-8 items-start">
         {/* Left: metrics */}
         <div className="flex-1 min-w-0">
           {/* Tab navigation */}
-          <div className="flex gap-1 bg-ink/5 rounded-xl p-1 mb-6">
+          <div className="flex gap-1 bg-ink/5 rounded-2xl p-1.5 mb-8">
             {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 py-2 text-sm rounded-lg transition-all ${
+                className={`flex-1 py-3 text-base rounded-xl transition-all ${
                   activeTab === tab.id
-                    ? 'bg-white text-ink font-medium shadow-sm'
+                    ? 'bg-white text-ink font-semibold shadow-sm'
                     : 'text-ink/50 hover:text-ink/80'
                 }`}
               >
@@ -578,10 +614,10 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
 
 function QuickStat({ label, value, assessment }) {
   return (
-    <div className="bg-white/10 rounded-xl p-3">
-      <p className="text-white/50 text-xs mb-1">{label}</p>
-      <p className="font-mono text-lg font-bold">{value}</p>
-      <p className="text-xs mt-1" style={{ color: assessment.color }}>
+    <div className="bg-white/10 rounded-2xl p-5">
+      <p className="text-white/50 text-sm mb-1">{label}</p>
+      <p className="font-mono text-2xl font-bold">{value}</p>
+      <p className="text-sm mt-1 font-medium" style={{ color: assessment.color }}>
         {assessment.icon} {assessment.label}
       </p>
     </div>
@@ -604,9 +640,9 @@ function OverviewTab({ summary, repMetrics }) {
   return (
     <div className="space-y-4">
       {/* Radar chart */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm">
-        <h3 className="font-display text-lg mb-1">Perfil de Movimiento</h3>
-        <p className="text-xs text-ink/40 mb-3">Evaluación normalizada 0–100</p>
+      <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-1">Perfil de Movimiento</h3>
+        <p className="text-sm text-ink/40 mb-4">Evaluación normalizada 0–100</p>
         <ResponsiveContainer width="100%" height={280}>
           <RadarChart data={radarData}>
             <PolarGrid stroke="#1A1A2E15" />
@@ -618,7 +654,7 @@ function OverviewTab({ summary, repMetrics }) {
       </div>
 
       {/* Metric cards grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-4">
         <MetricCard
           title="ROM Medio"
           value={`${summary.meanROM}°`}
@@ -684,9 +720,9 @@ function OverviewTab({ summary, repMetrics }) {
       </div>
 
       {/* ROM per rep bar chart */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm">
-        <h3 className="font-display text-lg mb-1">ROM por Repetición</h3>
-        <p className="text-xs text-ink/40 mb-3">Degradación indica fatiga muscular</p>
+      <div className="bg-white rounded-3xl p-6 shadow-sm">
+        <h3 className="font-display text-xl font-bold mb-1">ROM por Repetición</h3>
+        <p className="text-sm text-ink/40 mb-4">Degradación indica fatiga muscular</p>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={repMetrics}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1A1A2E10" />
@@ -718,12 +754,12 @@ function OptimalBar({ optimal, assessment }) {
   const closeness = Math.max(0, 100 - (distance / maxDistance) * 100);
 
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] text-ink/40">Tu valor</span>
-        <span className="text-[10px] text-ink/40">Meta: <strong className="text-ink/60">{optimal.value}</strong></span>
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs text-ink/40">Tu valor</span>
+        <span className="text-xs text-ink/40">Meta: <strong className="text-ink/60">{optimal.value}</strong></span>
       </div>
-      <div className="relative w-full h-3 bg-ink/5 rounded-full overflow-visible">
+      <div className="relative w-full h-4 bg-ink/5 rounded-full overflow-visible">
         {/* Current value bar */}
         <div
           className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
@@ -735,22 +771,22 @@ function OptimalBar({ optimal, assessment }) {
         />
         {/* Optimal zone marker */}
         <div
-          className="absolute top-[-3px] w-0.5 h-[18px] rounded-full bg-ink/60"
+          className="absolute top-[-3px] w-0.5 h-[22px] rounded-full bg-ink/60"
           style={{ left: `${targetPct}%` }}
           title={`Óptimo: ${target}${optimal.unit}`}
         />
         <div
-          className="absolute top-[-12px] text-[8px] font-mono text-ink/50 -translate-x-1/2"
+          className="absolute top-[-14px] text-[9px] font-mono text-ink/50 -translate-x-1/2"
           style={{ left: `${targetPct}%` }}
         >
           {target}{optimal.unit}
         </div>
       </div>
-      <div className="flex items-center justify-between mt-1">
-        <span className="text-[10px] font-mono" style={{ color: assessment.color }}>
+      <div className="flex items-center justify-between mt-1.5">
+        <span className="text-xs font-mono font-semibold" style={{ color: assessment.color }}>
           {current}{optimal.unit}
         </span>
-        <span className="text-[10px] text-ink/30">
+        <span className="text-xs text-ink/40">
           {closeness >= 80 ? 'En zona óptima' : closeness >= 50 ? 'Cerca del óptimo' : lower ? 'Reducir para mejorar' : 'Aumentar para mejorar'}
         </span>
       </div>
@@ -762,29 +798,32 @@ function MetricCard({ title, value, subtitle, assessment, detail, optimal }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div
-      className="metric-card bg-white rounded-2xl p-4 shadow-sm cursor-pointer"
+      className="metric-card bg-white rounded-3xl p-5 shadow-sm cursor-pointer"
       onClick={() => setExpanded(!expanded)}
     >
-      <p className="text-xs text-ink/50 mb-1">{title}</p>
-      <p className="font-mono text-2xl font-bold text-ink">{value}</p>
-      <p className="text-xs text-ink/40 mt-0.5">{subtitle}</p>
-      <div className="mt-2 flex items-center gap-1">
-        <span className="text-xs font-medium" style={{ color: assessment.color }}>
+      <p className="text-sm text-ink/50 mb-1 font-medium">{title}</p>
+      <p className="font-mono text-3xl font-bold text-ink">{value}</p>
+      <p className="text-sm text-ink/40 mt-1">{subtitle}</p>
+      <div className="mt-3 flex items-center gap-2">
+        <span
+          className="text-sm font-semibold px-3 py-1 rounded-full"
+          style={{ color: assessment.color, backgroundColor: assessment.color + '18' }}
+        >
           {assessment.icon} {assessment.label}
         </span>
-        <span className="text-[10px] text-ink/30 ml-auto">{expanded ? '▲' : '▼'} ver más</span>
+        <span className="text-xs text-ink/30 ml-auto">{expanded ? '▲' : '▼'}</span>
       </div>
 
       {/* Optimal comparison bar — always visible */}
       <OptimalBar optimal={optimal} assessment={assessment} />
 
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-ink/10 space-y-2">
-          <p className="text-xs text-ink/50">{detail}</p>
+        <div className="mt-4 pt-4 border-t border-ink/10 space-y-3">
+          <p className="text-sm text-ink/60 leading-relaxed">{detail}</p>
           {assessment.tip && (
-            <div className="bg-bone rounded-lg p-3" style={{ borderLeft: `3px solid ${assessment.color}` }}>
-              <p className="text-[10px] font-medium text-ink/60 mb-1">Consejo</p>
-              <p className="text-xs text-ink/70 leading-relaxed">{assessment.tip}</p>
+            <div className="bg-bone rounded-xl p-4" style={{ borderLeft: `4px solid ${assessment.color}` }}>
+              <p className="text-xs font-semibold text-ink/60 mb-1 uppercase tracking-wide">Consejo</p>
+              <p className="text-sm text-ink/70 leading-relaxed">{assessment.tip}</p>
             </div>
           )}
         </div>
