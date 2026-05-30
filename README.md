@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/LogoEasyFisio.png" alt="EasyFisio Logo" width="400" />
+  <img src="public/LogoEasyFisio.png" alt="EasyFisio Logo" width="800" />
 </p>
 
 <h3 align="center">Biomechanical analysis of therapeutic exercises using computer vision</h3>
