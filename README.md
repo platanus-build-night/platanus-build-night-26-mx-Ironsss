@@ -1,6 +1,6 @@
-# RehabMotion
+# EasyFisio
 
-<img src="./project-logo.png" alt="RehabMotion Logo" width="200" />
+<img src="./project-logo.png" alt="EasyFisio Logo" width="200" />
 
 Biomechanical analysis of therapeutic exercises using computer vision. **100% client-side** — no servers, no API keys, everything runs in the browser.
 
