@@ -1,38 +1,80 @@
-# David Alexis Garcia Espinosa — Platanus Build Night — Ciudad de México Project
+# RehabMotion
 
-**Current project logo:** project-logo.png
+<img src="./project-logo.png" alt="RehabMotion Logo" width="200" />
 
-<img src="./project-logo.png" alt="Project Logo" width="200" />
+Biomechanical analysis of therapeutic exercises using computer vision. **100% client-side** — no servers, no API keys, everything runs in the browser.
 
-Hacker:
+Hacker: **David Alexis Garcia Espinosa** ([@Ironsss](https://github.com/Ironsss))
 
-- David Alexis Garcia Espinosa ([@Ironsss](https://github.com/Ironsss))
+---
 
-Before submitting:
+## What it does
 
-- ✅ Set a project name, oneliner and description in build-night-project.json
-- ✅ Provide a 1000x1000 png project logo, max 500kb (project-logo.png)
-- ✅ Provide a concise and to the point readme
+Upload a video of a **bicep curl** and get:
 
-## ⚠️ Deploying (Vercel, Render, etc.)
+- **8 clinical metrics** with automatic evaluation
+- **Rep detection** via elbow angle analysis
+- **Interactive charts** — time series and per-rep breakdown
+- **Radar profile** of movement quality
+- **Session history** (localStorage + demo mode)
 
-Deploy platforms like **Vercel**, **Render** or **Netlify** can only connect to
-repositories **you own** — they can't be granted access to this organization repo.
-To deploy while keeping your commits here, mirror your code to a personal repo:
+## Clinical Metrics
 
-1. Create a **personal** repository on your own GitHub account.
-2. Point your local `origin` at **both** repos, so a single `git push` updates each one:
+| Metric | What it measures | Clinical use |
+|--------|-----------------|-------------|
+| ROM | Elbow range of motion | Joint recovery |
+| Angular Velocity | Neuromuscular control | Spasticity, power |
+| TUT | Time under tension | Exercise dosage |
+| C:E Ratio | Concentric vs eccentric tempo | Tendinopathies |
+| Fatigue Index | ROM degradation across the set | Load prescription |
+| Trunk Compensation | Torso lean angle | Technique, excessive load |
+| CV (Consistency) | Variability between reps | Motor control |
+| Hold Time | Pause at peak contraction | Isometric strength |
 
-   ```bash
-   # this org repo (keep it as a push target)...
-   git remote set-url --add --push origin https://github.com/platanus-build-night/platanus-build-night-26-mx-Ironsss.git
-   # ...and your personal repo
-   git remote set-url --add --push origin https://github.com/<your-user>/<your-repo>.git
-   ```
+Full documentation with formulas and references: [`docs/CLINICAL_METRICS.md`](docs/CLINICAL_METRICS.md)
 
-   From now on `git push` sends every commit to **both** repositories.
-3. Connect your deploy service (Vercel, Render, …) to your **personal** repo and deploy from there.
+## Stack
 
-Your commits stay mirrored here for judging, while the deploy runs from the repo you control.
+- **React 18** + **Vite 5** — fast builds, instant HMR
+- **MediaPipe Pose Landmarker** (WASM) — 33 landmarks, runs on browser GPU
+- **Recharts** — interactive, responsive charts
+- **Tailwind CSS** (CDN) — responsive out of the box
+- **localStorage** — session history without a backend
 
-Have fun! 🚀
+## Quick Start
+
+```bash
+git clone https://github.com/platanus-build-night/platanus-build-night-26-mx-Ironsss.git
+cd platanus-build-night-26-mx-Ironsss
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/rehab-motion/` in your browser.
+
+## Deploy to GitHub Pages
+
+1. Go to **Settings > Pages > Source** and select **GitHub Actions**
+2. Push to `main` — the workflow in `.github/workflows/deploy.yml` handles the rest
+3. Your app will be at `https://platanus-build-night.github.io/platanus-build-night-26-mx-Ironsss/`
+
+## Architecture
+
+```
+src/
+├── main.jsx              # Entry point
+├── App.jsx               # Main app with all views
+├── index.css             # Global styles
+├── analysis/
+│   └── engine.js         # Analysis engine: MediaPipe + angles + reps + metrics
+└── data/
+    └── demoHistory.js    # Demo data: 6-week progression
+```
+
+## Tips for recording videos
+
+- Film from the **side** (lateral view) for best detection
+- Good **lighting** — avoid backlight
+- The active arm should be **fully visible**
+- **15-30 seconds** is enough for 8-12 reps
+- Use a tripod or prop your phone for stability
