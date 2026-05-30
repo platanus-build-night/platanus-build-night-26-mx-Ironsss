@@ -85,8 +85,8 @@ export default function App() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-ink text-white px-4 py-3 flex items-center justify-between">
         <button onClick={() => setView('upload')} className="flex items-center gap-2">
-          <span className="text-accent text-xl font-bold font-display">RM</span>
-          <span className="font-display text-lg hidden sm:inline">RehabMotion</span>
+          <span className="text-accent text-xl font-bold font-display">EF</span>
+          <span className="font-display text-lg hidden sm:inline">EasyFisio</span>
         </button>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
@@ -271,9 +271,41 @@ function findClosestFrame(frameLandmarks, currentTime) {
   return closest;
 }
 
-function drawSkeletonOnCanvas(ctx, lm, w, h, activeSide) {
-  ctx.clearRect(0, 0, w, h);
-  if (!lm) return;
+// Calculate the actual video render area inside a container with objectFit: contain
+function getVideoFitRect(video, containerW, containerH) {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return { x: 0, y: 0, w: containerW, h: containerH };
+
+  const containerRatio = containerW / containerH;
+  const videoRatio = vw / vh;
+
+  let drawW, drawH, offsetX, offsetY;
+  if (videoRatio > containerRatio) {
+    // Video wider than container → pillarbox (black bars top/bottom)
+    drawW = containerW;
+    drawH = containerW / videoRatio;
+    offsetX = 0;
+    offsetY = (containerH - drawH) / 2;
+  } else {
+    // Video taller than container → letterbox (black bars left/right)
+    drawH = containerH;
+    drawW = containerH * videoRatio;
+    offsetX = (containerW - drawW) / 2;
+    offsetY = 0;
+  }
+  return { x: offsetX, y: offsetY, w: drawW, h: drawH };
+}
+
+function drawSkeletonOnCanvas(ctx, lm, canvasW, canvasH, activeSide, videoFit) {
+  ctx.clearRect(0, 0, canvasW, canvasH);
+  if (!lm || !videoFit) return;
+
+  const { x: ox, y: oy, w, h } = videoFit;
+
+  // Map landmark normalized coords to canvas pixel coords
+  const toX = (nx) => ox + nx * w;
+  const toY = (ny) => oy + ny * h;
 
   // Draw connections
   for (const [a, b] of POSE_CONNECTIONS) {
@@ -286,8 +318,8 @@ function drawSkeletonOnCanvas(ctx, lm, w, h, activeSide) {
     ctx.strokeStyle = isActiveArm ? '#E94560' : 'rgba(22, 199, 154, 0.7)';
     ctx.lineWidth = isActiveArm ? 3.5 : 2;
     ctx.beginPath();
-    ctx.moveTo(pa.x * w, pa.y * h);
-    ctx.lineTo(pb.x * w, pb.y * h);
+    ctx.moveTo(toX(pa.x), toY(pa.y));
+    ctx.lineTo(toX(pb.x), toY(pb.y));
     ctx.stroke();
   }
 
@@ -301,7 +333,7 @@ function drawSkeletonOnCanvas(ctx, lm, w, h, activeSide) {
     ctx.fillStyle = isActive ? '#E94560' : 'rgba(22, 199, 154, 0.8)';
     const r = isActive ? 5 : 3;
     ctx.beginPath();
-    ctx.arc(p.x * w, p.y * h, r, 0, 2 * Math.PI);
+    ctx.arc(toX(p.x), toY(p.y), r, 0, 2 * Math.PI);
     ctx.fill();
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 1;
@@ -329,8 +361,8 @@ function drawSkeletonOnCanvas(ctx, lm, w, h, activeSide) {
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 3;
     const text = `${angleDeg}°`;
-    const tx = elbow.x * w + 12;
-    const ty = elbow.y * h - 8;
+    const tx = toX(elbow.x) + 12;
+    const ty = toY(elbow.y) - 8;
     ctx.strokeText(text, tx, ty);
     ctx.fillText(text, tx, ty);
   }
@@ -382,8 +414,9 @@ function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, 
       canvas.width = rect.width;
       canvas.height = rect.height;
 
+      const videoFit = getVideoFitRect(video, canvas.width, canvas.height);
       const closest = findClosestFrame(frameLandmarks, video.currentTime);
-      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide);
+      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
       animFrameRef.current = requestAnimationFrame(draw);
     };
 
