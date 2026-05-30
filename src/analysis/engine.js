@@ -10,10 +10,12 @@ const LANDMARKS = {
   LEFT_HIP: 23, RIGHT_HIP: 24,
 };
 
-const ANALYSIS_FPS = 15; // Sample rate for processing
-const SMOOTHING_WINDOW = 5;
+const ANALYSIS_FPS = 24; // Higher sample rate for better accuracy
+const SMOOTHING_WINDOW = 7; // Wider window for smoother signal
 const REP_ANGLE_THRESHOLD = 90; // Angle below which we consider "in flexion"
 const MIN_REP_DURATION_MS = 800; // Minimum rep duration to filter noise
+const MIN_LANDMARK_CONFIDENCE = 0.5; // Discard frames below this visibility
+const MAX_ANGLE_JUMP = 35; // Max degrees change between consecutive frames (outlier filter)
 
 // ──────────────────────────────────────────────
 // MATH UTILITIES
@@ -34,6 +36,31 @@ function trunkLeanAngle(shoulder, hip) {
   const dx = shoulder.x - hip.x;
   const dy = hip.y - shoulder.y; // Y is inverted in screen coords
   return Math.atan2(dx, dy) * (180 / Math.PI);
+}
+
+// Remove outlier spikes: if a value jumps more than MAX_ANGLE_JUMP from both neighbors, replace with average of neighbors
+function removeOutliers(data) {
+  const result = [...data];
+  for (let i = 1; i < result.length - 1; i++) {
+    const prev = result[i - 1];
+    const curr = result[i];
+    const next = result[i + 1];
+    if (Math.abs(curr - prev) > MAX_ANGLE_JUMP && Math.abs(curr - next) > MAX_ANGLE_JUMP) {
+      result[i] = (prev + next) / 2;
+    }
+  }
+  return result;
+}
+
+// Median filter: replaces each value with the median of its window (removes noise spikes better than mean)
+function medianFilter(data, windowSize) {
+  const half = Math.floor(windowSize / 2);
+  return data.map((_, i) => {
+    const start = Math.max(0, i - half);
+    const end = Math.min(data.length, i + half + 1);
+    const slice = data.slice(start, end).sort((a, b) => a - b);
+    return slice[Math.floor(slice.length / 2)];
+  });
 }
 
 function movingAverage(data, window) {
@@ -68,15 +95,18 @@ export async function initPoseLandmarker(onProgress) {
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
   );
 
-  onProgress?.('Descargando modelo de pose (~8MB)... (15%)');
+  onProgress?.('Descargando modelo de pose full (~18MB)... (15%)');
   poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath:
-        'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
       delegate: 'GPU',
     },
     runningMode: 'VIDEO',
     numPoses: 1,
+    minPoseDetectionConfidence: 0.6,
+    minPosePresenceConfidence: 0.6,
+    minTrackingConfidence: 0.6,
   });
 
   onProgress?.('Modelo listo, preparando análisis... (25%)');
@@ -134,7 +164,19 @@ export async function processVideo(videoFile, onProgress, onFrame) {
           if (result.landmarks && result.landmarks.length > 0) {
             const lm = result.landmarks[0];
 
-            // Determine active side (the one with more wrist movement relative to shoulder)
+            // Check confidence of key landmarks (shoulders, elbows, wrists, hips)
+            const keyIndices = [11, 12, 13, 14, 15, 16, 23, 24];
+            const keyConfidence = mean(keyIndices.map(idx => lm[idx]?.visibility || 0));
+
+            // Skip frame if key landmarks are not confident enough
+            if (keyConfidence < MIN_LANDMARK_CONFIDENCE) {
+              frameIndex++;
+              const pct = 30 + Math.round((frameIndex / totalFrames) * 70);
+              onProgress?.(`Analizando frame ${frameIndex}/${totalFrames} (${pct}%) — frame descartado por baja confianza`);
+              setTimeout(processNextFrame, 0);
+              return;
+            }
+
             const leftElbowAngle = vectorAngle(
               lm[LANDMARKS.LEFT_SHOULDER], lm[LANDMARKS.LEFT_ELBOW], lm[LANDMARKS.LEFT_WRIST]
             );
@@ -152,7 +194,7 @@ export async function processVideo(videoFile, onProgress, onFrame) {
               rightElbowAngle,
               trunkLean: (leftTrunk + rightTrunk) / 2,
               landmarks: lm,
-              confidence: lm.map(l => l.visibility || 0).reduce((a, b) => a + b, 0) / lm.length,
+              confidence: keyConfidence,
             });
 
             onFrame?.({
@@ -210,9 +252,13 @@ function analyzeSession(rawData) {
   const timestamps = rawData.map(d => d.timestamp);
   const trunkAngles = rawData.map(d => d.trunkLean);
 
-  // Smooth signals
-  const smoothedAngles = movingAverage(elbowAngles, SMOOTHING_WINDOW);
-  const smoothedTrunk = movingAverage(trunkAngles, SMOOTHING_WINDOW);
+  // Smoothing pipeline: outlier removal → median filter → moving average
+  const cleanedAngles = removeOutliers(elbowAngles);
+  const medianAngles = medianFilter(cleanedAngles, 3);
+  const smoothedAngles = movingAverage(medianAngles, SMOOTHING_WINDOW);
+
+  const cleanedTrunk = removeOutliers(trunkAngles);
+  const smoothedTrunk = movingAverage(cleanedTrunk, SMOOTHING_WINDOW);
 
   // Detect reps
   const reps = detectReps(smoothedAngles, timestamps);

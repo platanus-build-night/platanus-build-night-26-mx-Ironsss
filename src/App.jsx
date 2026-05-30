@@ -258,177 +258,202 @@ const POSE_CONNECTIONS = [
   [24, 26], [26, 28], // right leg
 ];
 
+function findClosestFrame(frameLandmarks, currentTime) {
+  let closest = frameLandmarks[0];
+  let minDist = Math.abs(currentTime - closest.timestamp);
+  for (let i = 1; i < frameLandmarks.length; i++) {
+    const dist = Math.abs(currentTime - frameLandmarks[i].timestamp);
+    if (dist < minDist) {
+      minDist = dist;
+      closest = frameLandmarks[i];
+    }
+  }
+  return closest;
+}
+
+function drawSkeletonOnCanvas(ctx, lm, w, h, activeSide) {
+  ctx.clearRect(0, 0, w, h);
+  if (!lm) return;
+
+  // Draw connections
+  for (const [a, b] of POSE_CONNECTIONS) {
+    const pa = lm[a];
+    const pb = lm[b];
+    if (!pa || !pb) continue;
+    const isActiveArm = activeSide === 'left'
+      ? [11, 13, 15].includes(a) && [11, 13, 15].includes(b)
+      : [12, 14, 16].includes(a) && [12, 14, 16].includes(b);
+    ctx.strokeStyle = isActiveArm ? '#E94560' : 'rgba(22, 199, 154, 0.7)';
+    ctx.lineWidth = isActiveArm ? 3.5 : 2;
+    ctx.beginPath();
+    ctx.moveTo(pa.x * w, pa.y * h);
+    ctx.lineTo(pb.x * w, pb.y * h);
+    ctx.stroke();
+  }
+
+  // Draw joints
+  for (let i = 0; i < lm.length; i++) {
+    if (i > 28) break;
+    const p = lm[i];
+    const isActive = activeSide === 'left'
+      ? [11, 13, 15].includes(i)
+      : [12, 14, 16].includes(i);
+    ctx.fillStyle = isActive ? '#E94560' : 'rgba(22, 199, 154, 0.8)';
+    const r = isActive ? 5 : 3;
+    ctx.beginPath();
+    ctx.arc(p.x * w, p.y * h, r, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Draw elbow angle
+  const elbowIdx = activeSide === 'left' ? 13 : 14;
+  const shoulderIdx = activeSide === 'left' ? 11 : 12;
+  const wristIdx = activeSide === 'left' ? 15 : 16;
+  if (lm[elbowIdx] && lm[shoulderIdx] && lm[wristIdx]) {
+    const elbow = lm[elbowIdx];
+    const sh = lm[shoulderIdx];
+    const wr = lm[wristIdx];
+    const ab = { x: sh.x - elbow.x, y: sh.y - elbow.y };
+    const cb = { x: wr.x - elbow.x, y: wr.y - elbow.y };
+    const dot = ab.x * cb.x + ab.y * cb.y;
+    const magAB = Math.sqrt(ab.x ** 2 + ab.y ** 2);
+    const magCB = Math.sqrt(cb.x ** 2 + cb.y ** 2);
+    const cosine = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
+    const angleDeg = Math.round(Math.acos(cosine) * (180 / Math.PI));
+
+    ctx.font = 'bold 14px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#E94560';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 3;
+    const text = `${angleDeg}°`;
+    const tx = elbow.x * w + 12;
+    const ty = elbow.y * h - 8;
+    ctx.strokeText(text, tx, ty);
+    ctx.fillText(text, tx, ty);
+  }
+}
+
 function AnnotatedVideoPanel({ videoURL, frameLandmarks, activeSide, totalReps, duration }) {
-  const videoRef = useRef(null);
+  const originalVideoRef = useRef(null);
+  const skeletonVideoRef = useRef(null);
   const canvasRef = useRef(null);
   const animFrameRef = useRef(null);
-  const [showSkeleton, setShowSkeleton] = useState(true);
+  const syncingRef = useRef(false);
 
+  // Sync both videos together
+  const syncVideos = useCallback((source, target) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    if (target.current && source.current) {
+      if (Math.abs(target.current.currentTime - source.current.currentTime) > 0.1) {
+        target.current.currentTime = source.current.currentTime;
+      }
+    }
+    syncingRef.current = false;
+  }, []);
+
+  const handlePlay = useCallback((sourceRef, targetRef) => {
+    syncVideos(sourceRef, targetRef);
+    targetRef.current?.play();
+  }, [syncVideos]);
+
+  const handlePause = useCallback((sourceRef, targetRef) => {
+    targetRef.current?.pause();
+    syncVideos(sourceRef, targetRef);
+  }, [syncVideos]);
+
+  const handleSeek = useCallback((sourceRef, targetRef) => {
+    syncVideos(sourceRef, targetRef);
+  }, [syncVideos]);
+
+  // Skeleton drawing loop
   useEffect(() => {
-    const video = videoRef.current;
+    const video = skeletonVideoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !frameLandmarks?.length) return;
 
     const ctx = canvas.getContext('2d');
 
-    const drawSkeleton = () => {
-      if (!showSkeleton) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        animFrameRef.current = requestAnimationFrame(drawSkeleton);
-        return;
-      }
-
-      const currentTime = video.currentTime;
-      // Find closest frame
-      let closest = frameLandmarks[0];
-      let minDist = Math.abs(currentTime - closest.timestamp);
-      for (let i = 1; i < frameLandmarks.length; i++) {
-        const dist = Math.abs(currentTime - frameLandmarks[i].timestamp);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = frameLandmarks[i];
-        }
-      }
-
-      const lm = closest.landmarks;
-      if (!lm) {
-        animFrameRef.current = requestAnimationFrame(drawSkeleton);
-        return;
-      }
-
-      // Match canvas to video display size
+    const draw = () => {
       const rect = video.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = rect.height;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const w = canvas.width;
-      const h = canvas.height;
-
-      // Draw connections
-      ctx.lineWidth = 2.5;
-      for (const [a, b] of POSE_CONNECTIONS) {
-        const pa = lm[a];
-        const pb = lm[b];
-        if (!pa || !pb) continue;
-        // Highlight active arm
-        const isActiveArm = activeSide === 'left'
-          ? [11, 13, 15].includes(a) && [11, 13, 15].includes(b)
-          : [12, 14, 16].includes(a) && [12, 14, 16].includes(b);
-        ctx.strokeStyle = isActiveArm ? '#E94560' : 'rgba(22, 199, 154, 0.7)';
-        ctx.lineWidth = isActiveArm ? 3.5 : 2;
-        ctx.beginPath();
-        ctx.moveTo(pa.x * w, pa.y * h);
-        ctx.lineTo(pb.x * w, pb.y * h);
-        ctx.stroke();
-      }
-
-      // Draw joints
-      for (let i = 0; i < lm.length; i++) {
-        if (i > 28) break; // Only body landmarks
-        const p = lm[i];
-        const isActive = activeSide === 'left'
-          ? [11, 13, 15].includes(i)
-          : [12, 14, 16].includes(i);
-        ctx.fillStyle = isActive ? '#E94560' : 'rgba(22, 199, 154, 0.8)';
-        const r = isActive ? 5 : 3;
-        ctx.beginPath();
-        ctx.arc(p.x * w, p.y * h, r, 0, 2 * Math.PI);
-        ctx.fill();
-        // White border
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-
-      // Draw elbow angle text near elbow
-      const elbowIdx = activeSide === 'left' ? 13 : 14;
-      const shoulderIdx = activeSide === 'left' ? 11 : 12;
-      const wristIdx = activeSide === 'left' ? 15 : 16;
-      if (lm[elbowIdx] && lm[shoulderIdx] && lm[wristIdx]) {
-        const elbow = lm[elbowIdx];
-        // Calculate angle
-        const sh = lm[shoulderIdx];
-        const wr = lm[wristIdx];
-        const ab = { x: sh.x - elbow.x, y: sh.y - elbow.y };
-        const cb = { x: wr.x - elbow.x, y: wr.y - elbow.y };
-        const dot = ab.x * cb.x + ab.y * cb.y;
-        const magAB = Math.sqrt(ab.x ** 2 + ab.y ** 2);
-        const magCB = Math.sqrt(cb.x ** 2 + cb.y ** 2);
-        const cosine = Math.max(-1, Math.min(1, dot / (magAB * magCB)));
-        const angleDeg = Math.round(Math.acos(cosine) * (180 / Math.PI));
-
-        ctx.font = 'bold 14px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#E94560';
-        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-        ctx.lineWidth = 3;
-        const text = `${angleDeg}°`;
-        const tx = elbow.x * w + 12;
-        const ty = elbow.y * h - 8;
-        ctx.strokeText(text, tx, ty);
-        ctx.fillText(text, tx, ty);
-      }
-
-      animFrameRef.current = requestAnimationFrame(drawSkeleton);
+      const closest = findClosestFrame(frameLandmarks, video.currentTime);
+      drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide);
+      animFrameRef.current = requestAnimationFrame(draw);
     };
 
-    video.addEventListener('play', drawSkeleton);
-    video.addEventListener('seeked', drawSkeleton);
-    // Start drawing if already playing or paused
-    drawSkeleton();
-
+    draw();
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      video.removeEventListener('play', drawSkeleton);
-      video.removeEventListener('seeked', drawSkeleton);
     };
-  }, [frameLandmarks, activeSide, showSkeleton]);
+  }, [frameLandmarks, activeSide]);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      <div className="relative">
+    <div className="space-y-3">
+      {/* Original video */}
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <p className="text-[10px] font-medium text-ink/50 uppercase tracking-wide px-3 pt-2">Original</p>
         <video
-          ref={videoRef}
+          ref={originalVideoRef}
           src={videoURL}
           controls
           loop
+          muted
           className="w-full bg-black"
-          style={{ maxHeight: '400px', objectFit: 'contain' }}
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          style={{ maxHeight: '280px', objectFit: 'contain' }}
+          onPlay={() => handlePlay(originalVideoRef, skeletonVideoRef)}
+          onPause={() => handlePause(originalVideoRef, skeletonVideoRef)}
+          onSeeked={() => handleSeek(originalVideoRef, skeletonVideoRef)}
         />
       </div>
-      <div className="p-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-ink/70">Tu video</p>
-            <p className="text-[10px] text-ink/40 mt-0.5">
-              Brazo {activeSide === 'left' ? 'izq.' : 'der.'} • {totalReps} reps • {Math.round(duration)}s
-            </p>
-          </div>
-          <button
-            onClick={() => setShowSkeleton(!showSkeleton)}
-            className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
-              showSkeleton
-                ? 'bg-accent/10 text-accent font-medium'
-                : 'bg-ink/5 text-ink/40'
-            }`}
-          >
-            {showSkeleton ? 'Skeleton ON' : 'Skeleton OFF'}
-          </button>
+
+      {/* Skeleton overlay video */}
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <p className="text-[10px] font-medium text-ink/50 uppercase tracking-wide px-3 pt-2">Análisis MediaPipe</p>
+        <div className="relative">
+          <video
+            ref={skeletonVideoRef}
+            src={videoURL}
+            loop
+            muted
+            className="w-full bg-black"
+            style={{ maxHeight: '280px', objectFit: 'contain' }}
+            onPlay={() => handlePlay(skeletonVideoRef, originalVideoRef)}
+            onPause={() => handlePause(skeletonVideoRef, originalVideoRef)}
+            onSeeked={() => handleSeek(skeletonVideoRef, originalVideoRef)}
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          />
         </div>
-        <div className="flex gap-2 mt-2">
+      </div>
+
+      {/* Info */}
+      <div className="bg-white rounded-2xl shadow-sm p-3">
+        <p className="text-[10px] text-ink/40">
+          Brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} detectado • {totalReps} reps • {Math.round(duration)}s
+        </p>
+        <div className="flex gap-3 mt-1.5">
           <div className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-accent" />
             <span className="text-[9px] text-ink/40">Brazo activo</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-glow" />
-            <span className="text-[9px] text-ink/40">Resto del cuerpo</span>
+            <span className="text-[9px] text-ink/40">Cuerpo</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-[9px] text-accent font-bold">90°</span>
+            <span className="text-[9px] text-ink/40">Ángulo codo</span>
           </div>
         </div>
+        <p className="text-[9px] text-ink/30 mt-1.5">Los videos están sincronizados — controla cualquiera de los dos.</p>
       </div>
     </div>
   );
