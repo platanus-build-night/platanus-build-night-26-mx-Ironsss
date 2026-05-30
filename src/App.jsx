@@ -2145,6 +2145,169 @@ function MethodologyTab({ repMetrics, summary }) {
         </div>
       </div>
 
+      {/* Architecture Diagram */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <h3 className="font-display text-xl mb-4">Arquitectura del Sistema</h3>
+        <div className="bg-ink/[0.03] rounded-xl p-4 overflow-x-auto">
+          <div className="min-w-[600px]">
+            {/* Pipeline diagram */}
+            <div className="flex items-start gap-2 justify-between">
+              {[
+                { label: 'Video Input', sub: 'MP4 / WebM\nnavegador local', color: '#0F3460', icon: '🎬' },
+                { label: 'Pose Detection', sub: 'MediaPipe\nPose Landmarker', color: '#E94560', icon: '🦴' },
+                { label: 'Analysis Engine', sub: 'Angulos, reps\nmetricas clinicas', color: '#F5A623', icon: '📐' },
+                { label: '3D Digital Twin', sub: 'Three.js\nMannequin + FEA', color: '#16C79A', icon: '🧍' },
+                { label: 'Dashboard', sub: 'Recharts\nReact UI', color: '#0F3460', icon: '📊' },
+              ].map((step, i, arr) => (
+                <React.Fragment key={i}>
+                  <div className="flex flex-col items-center text-center" style={{ flex: '1 1 0' }}>
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-2 shadow-sm"
+                      style={{ backgroundColor: step.color + '15', border: `2px solid ${step.color}40` }}>
+                      {step.icon}
+                    </div>
+                    <p className="text-xs font-bold text-ink/80 mb-0.5">{step.label}</p>
+                    <p className="text-[10px] text-ink/40 whitespace-pre-line leading-tight">{step.sub}</p>
+                  </div>
+                  {i < arr.length - 1 && (
+                    <div className="flex items-center pt-5 text-ink/20 text-lg font-bold select-none">→</div>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+
+            {/* Data flow labels */}
+            <div className="flex justify-between mt-3 px-4">
+              {['Video frames', '33 landmarks/frame', 'ROM, TUT, C:E...', 'Poses 3D + stress', 'Visualizacion'].map((label, i) => (
+                <p key={i} className="text-[8px] text-ink/25 text-center italic" style={{ flex: '1 1 0' }}>{label}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* All client-side badge */}
+        <div className="mt-4 flex items-center gap-2 px-1">
+          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+          <span className="text-xs text-ink/50">100% client-side — ningun dato sale de tu navegador</span>
+        </div>
+      </div>
+
+      {/* Tech Stack */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <h3 className="font-display text-xl mb-4">Stack Tecnologico (100% Open Source)</h3>
+        <div className="space-y-3">
+          {[
+            {
+              name: 'React 18',
+              pkg: 'react + react-dom',
+              version: '18.3.1',
+              license: 'MIT',
+              use: 'Framework de UI. Maneja el estado de la aplicacion, renderizado de componentes, y el ciclo de vida de las vistas (upload, procesamiento, dashboard, feedback).',
+              file: 'src/App.jsx, src/main.jsx',
+              url: 'https://react.dev',
+            },
+            {
+              name: 'Vite',
+              pkg: 'vite + @vitejs/plugin-react',
+              version: '5.4.2',
+              license: 'MIT',
+              use: 'Bundler y dev server. Compila JSX, sirve hot-reload en desarrollo, y genera el build de produccion optimizado.',
+              file: 'vite.config.js',
+              url: 'https://vitejs.dev',
+            },
+            {
+              name: 'MediaPipe Pose Landmarker',
+              pkg: '@mediapipe/tasks-vision',
+              version: '0.10.18',
+              license: 'Apache 2.0',
+              use: 'Modelo de IA de Google que detecta 33 puntos del cuerpo humano en cada frame del video. Corre 100% en el navegador via WebAssembly + GPU. Es el corazon del analisis.',
+              file: 'src/analysis/engine.js',
+              url: 'https://ai.google.dev/edge/mediapipe',
+            },
+            {
+              name: 'Three.js',
+              pkg: 'three',
+              version: '0.184.0',
+              license: 'MIT',
+              use: 'Motor 3D WebGL. Renderiza el maniqui Digital Twin (cuerpo completo con LatheGeometry), el visor de segmento FEA (BufferGeometry con vertex colors para mapa de esfuerzo), y los controles de camara (OrbitControls).',
+              file: 'src/components/MannequinViewer.jsx, src/components/ArmDetailViewer.jsx',
+              url: 'https://threejs.org',
+            },
+            {
+              name: 'Recharts',
+              pkg: 'recharts',
+              version: '2.12.7',
+              license: 'MIT',
+              use: 'Graficas interactivas: angulo del codo vs tiempo (AreaChart), compensacion del tronco, comparativa por rep (BarChart), radar de metricas. Todas las zonas de referencia usan ReferenceArea.',
+              file: 'src/App.jsx (TimeseriesTab, DashboardView)',
+              url: 'https://recharts.org',
+            },
+            {
+              name: 'Tailwind CSS',
+              pkg: 'CDN (tailwindcss.com)',
+              version: '3.x',
+              license: 'MIT',
+              use: 'Framework CSS utility-first. Toda la UI usa clases de Tailwind con tema personalizado (colores bone, ink, accent, mint, glow). Cargado via CDN en index.html.',
+              file: 'index.html (config), todos los componentes',
+              url: 'https://tailwindcss.com',
+            },
+            {
+              name: 'KaTeX',
+              pkg: 'CDN (katex)',
+              version: '0.16.11',
+              license: 'MIT',
+              use: 'Renderizado de formulas matematicas LaTeX. Muestra las ecuaciones de cada metrica en la pestana de Metodologia (ROM, velocidad angular, etc).',
+              file: 'src/App.jsx (Latex component)',
+              url: 'https://katex.org',
+            },
+            {
+              name: 'Google Fonts',
+              pkg: 'CDN',
+              version: '-',
+              license: 'OFL / Apache 2.0',
+              use: 'Tipografias: Plus Jakarta Sans (headings), Inter (body), JetBrains Mono (datos numericos y codigo).',
+              file: 'index.html',
+              url: 'https://fonts.google.com',
+            },
+          ].map((tech, i) => (
+            <div key={i} className="border border-ink/5 rounded-xl p-4 hover:border-ink/15 transition-colors">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <h4 className="font-display font-bold text-ink">{tech.name}</h4>
+                  <p className="text-[10px] text-ink/40 font-mono">{tech.pkg} v{tech.version}</p>
+                </div>
+                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">
+                  {tech.license}
+                </span>
+              </div>
+              <p className="text-sm text-ink/65 leading-relaxed mb-2">{tech.use}</p>
+              <p className="text-[10px] text-ink/30 font-mono">Archivos: {tech.file}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Component Map */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <h3 className="font-display text-xl mb-4">Mapa de Componentes</h3>
+        <div className="space-y-2 font-mono text-sm">
+          {[
+            { path: 'src/main.jsx', desc: 'Entry point — monta React en el DOM' },
+            { path: 'src/App.jsx', desc: 'App principal: UploadView, ProcessingView, DashboardView, FeedbackView, TimeseriesTab, RepsTab, MethodologyTab, HistoryView, IdealTwinSection' },
+            { path: 'src/analysis/engine.js', desc: 'Motor de analisis: processVideo(), deteccion de reps, calculo de metricas (ROM, TUT, C:E, trunk, fatigue, hold)' },
+            { path: 'src/components/MannequinViewer.jsx', desc: 'Digital Twin 3D cuerpo completo — LatheGeometry organica, materiales PBR, sombras, iluminacion de estudio' },
+            { path: 'src/components/ArmDetailViewer.jsx', desc: 'Visor FEA del brazo — BufferGeometry con vertex colors, mapa de esfuerzo jet colormap, wireframe overlay' },
+            { path: 'src/data/demoHistory.js', desc: 'Datos demo: historial simulado de 6 semanas de rehabilitacion para modo Demo' },
+            { path: 'index.html', desc: 'Shell HTML: CDN imports (Tailwind, KaTeX, Google Fonts), meta tags, Tailwind theme config' },
+            { path: 'vite.config.js', desc: 'Configuracion Vite: plugin React, base path /rehab-motion/' },
+          ].map((comp, i) => (
+            <div key={i} className="flex gap-3 items-start py-2 border-b border-ink/5 last:border-0">
+              <span className="text-[11px] text-accent font-bold whitespace-nowrap flex-shrink-0">{comp.path}</span>
+              <span className="text-[11px] text-ink/50">{comp.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <p className="text-xs text-ink/40 uppercase tracking-wide font-medium px-1">Las 8 métricas clínicas</p>
 
       {METRICS_INFO.map((metric, i) => {
