@@ -1,0 +1,63 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1A1A2E33; border-radius: 3px; }
+
+/* Progress bar animation */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px #16C79A44; }
+  50% { box-shadow: 0 0 20px #16C79A88; }
+}
+
+.progress-glow {
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+/* Metric card hover */
+.metric-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(26, 26, 46, 0.12);
+}
+
+/* Upload zone */
+.upload-zone {
+  border: 2px dashed #1A1A2E33;
+  transition: all 0.3s ease;
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: #E94560;
+  background: #E9456008;
+}
+
+/* Skeleton overlay canvas */
+.skeleton-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Rep timeline marker */
+.rep-marker {
+  transition: all 0.2s ease;
+}
+.rep-marker:hover {
+  transform: scale(1.2);
+}
