@@ -578,123 +578,118 @@ function drawBodyOverlay(ctx, lm, videoFit, score) {
   ctx.globalAlpha = 1.0;
 }
 
-// ─── Generate ideal-form landmarks for the "good twin" ───
+// ─── Generate ideal-form landmarks with proper timing ───
+// Creates its OWN timeline: 1s rest + 3.5s per rep (1.2s up + 0.6s hold + 1.7s down)
+// Moves BOTH arms symmetrically
 function generateIdealLandmarks(frameLandmarks, repMetrics, activeSide) {
-  if (!frameLandmarks?.length || !repMetrics?.length) return frameLandmarks;
+  if (!frameLandmarks?.length || !repMetrics?.length) return [];
 
-  const shIdx = activeSide === 'left' ? 11 : 12;
-  const elIdx = activeSide === 'left' ? 13 : 14;
-  const wrIdx = activeSide === 'left' ? 15 : 16;
-
-  // Smoothstep for butter-smooth transitions
   const smooth = (x) => x * x * (3 - 2 * x);
+  const numReps = repMetrics.length;
 
-  // Compute stable average arm segment lengths across all frames
-  let totalUpper = 0, totalFore = 0, count = 0;
-  for (const frame of frameLandmarks) {
-    const lm = frame.landmarks;
-    if (!lm[shIdx] || !lm[elIdx] || !lm[wrIdx]) continue;
-    totalUpper += Math.sqrt((lm[elIdx].x - lm[shIdx].x) ** 2 + (lm[elIdx].y - lm[shIdx].y) ** 2);
-    totalFore += Math.sqrt((lm[wrIdx].x - lm[elIdx].x) ** 2 + (lm[wrIdx].y - lm[elIdx].y) ** 2);
-    count++;
+  // Ideal timing constants (seconds)
+  const REST_BEFORE = 1.0;     // rest before first rep
+  const CONCENTRIC = 1.2;      // lifting phase
+  const HOLD = 0.6;            // isometric hold at top
+  const ECCENTRIC = 1.7;       // lowering phase (slower = controlled)
+  const REST_BETWEEN = 1.0;    // rest between reps
+  const REP_DUR = CONCENTRIC + HOLD + ECCENTRIC;
+  const TOTAL_DUR = REST_BEFORE + numReps * REP_DUR + (numReps - 1) * REST_BETWEEN + 0.5;
+
+  // Compute average arm segment lengths from first frame
+  const refLm = frameLandmarks[0].landmarks;
+  const armPairs = [[11, 13, 15], [12, 14, 16]]; // left, right
+  let avgUpper = 0, avgFore = 0, armCount = 0;
+  for (const [sh, el, wr] of armPairs) {
+    if (refLm[sh] && refLm[el] && refLm[wr]) {
+      avgUpper += Math.sqrt((refLm[el].x - refLm[sh].x) ** 2 + (refLm[el].y - refLm[sh].y) ** 2);
+      avgFore += Math.sqrt((refLm[wr].x - refLm[el].x) ** 2 + (refLm[wr].y - refLm[el].y) ** 2);
+      armCount++;
+    }
   }
-  const avgUpper = count > 0 ? totalUpper / count : 0.12;
-  const avgFore = count > 0 ? totalFore / count : 0.10;
+  avgUpper = armCount > 0 ? avgUpper / armCount : 0.12;
+  avgFore = armCount > 0 ? avgFore / armCount : 0.10;
 
-  // Pre-compute ideal angle for every frame as a continuous curve, then smooth it
-  const idealAngles = frameLandmarks.map(frame => {
-    const t = frame.timestamp;
-    const rep = repMetrics.find(r => t >= r.startTime && t <= r.endTime);
+  // Generate frames at 30fps with ideal timing
+  const FPS = 30;
+  const totalFrames = Math.ceil(TOTAL_DUR * FPS);
+  const idealFrames = [];
 
-    if (!rep) {
-      // Between reps — find proximity to nearest rep for smooth blend
-      let distToPrev = Infinity, distToNext = Infinity;
-      for (const r of repMetrics) {
-        if (r.endTime <= t) distToPrev = Math.min(distToPrev, t - r.endTime);
-        if (r.startTime >= t) distToNext = Math.min(distToNext, r.startTime - t);
+  // Build ideal repMetrics for the IdealTwinSection to use
+  const idealRepMetrics = [];
+  for (let r = 0; r < numReps; r++) {
+    const repStart = REST_BEFORE + r * (REP_DUR + REST_BETWEEN);
+    idealRepMetrics.push({
+      repNumber: r + 1,
+      startTime: repStart,
+      endTime: repStart + REP_DUR,
+    });
+  }
+
+  // Compute ideal angle at a given time
+  function idealAngleAtTime(t) {
+    // Find which rep we're in
+    for (const rep of idealRepMetrics) {
+      if (t >= rep.startTime && t <= rep.endTime) {
+        const elapsed = t - rep.startTime;
+        let angleNorm; // 0 = flexed (35°), 1 = extended (165°)
+
+        if (elapsed < CONCENTRIC) {
+          // Concentric: extend → flex (1→0)
+          angleNorm = 1 - smooth(elapsed / CONCENTRIC);
+        } else if (elapsed < CONCENTRIC + HOLD) {
+          // Isometric hold at peak
+          angleNorm = 0;
+        } else {
+          // Eccentric: flex → extend (0→1)
+          const p = (elapsed - CONCENTRIC - HOLD) / ECCENTRIC;
+          angleNorm = smooth(p);
+        }
+        return 35 + angleNorm * 130;
       }
-      // Resting angle ~165° (slight natural bend, not perfectly straight)
-      return 165;
     }
+    // Between reps or resting
+    return 165;
+  }
 
-    const repDur = rep.endTime - rep.startTime;
-    const progress = Math.max(0, Math.min(1, (t - rep.startTime) / repDur));
+  // Use the first real frame as body template (for torso, legs, head positions)
+  const baseLm = frameLandmarks[0].landmarks;
 
-    // Ideal curl phases with smooth easing:
-    // 0.00–0.05: ease out of resting
-    // 0.05–0.40: concentric (flex) — 2 sec feel
-    // 0.40–0.55: isometric hold at peak contraction
-    // 0.55–1.00: eccentric (extend slowly) — 3 sec feel
-    let angleNorm; // 0 = fully flexed (35°), 1 = resting (165°)
-    if (progress < 0.05) {
-      // Ease from resting into concentric
-      angleNorm = 1 - smooth(progress / 0.05) * 0.05;
-    } else if (progress < 0.40) {
-      // Concentric phase — smooth flexion
-      const p = (progress - 0.05) / 0.35;
-      angleNorm = 0.95 * (1 - smooth(p));
-    } else if (progress < 0.55) {
-      // Isometric hold at peak
-      angleNorm = 0;
-    } else if (progress < 0.95) {
-      // Eccentric phase — slow controlled extension
-      const p = (progress - 0.55) / 0.40;
-      angleNorm = smooth(p) * 0.95;
-    } else {
-      // Ease back to resting
-      const p = (progress - 0.95) / 0.05;
-      angleNorm = 0.95 + smooth(p) * 0.05;
-    }
+  for (let f = 0; f < totalFrames; f++) {
+    const t = f / FPS;
+    const lm = baseLm.map(l => ({ ...l }));
 
-    return 35 + angleNorm * 130; // 35° to 165°
-  });
-
-  // Apply a simple moving-average smoothing pass (window=5) to remove any remaining jitter
-  const smoothedAngles = idealAngles.map((a, i) => {
-    const win = 3;
-    let sum = 0, n = 0;
-    for (let j = Math.max(0, i - win); j <= Math.min(idealAngles.length - 1, i + win); j++) {
-      sum += idealAngles[j];
-      n++;
-    }
-    return sum / n;
-  });
-
-  return frameLandmarks.map((frame, fi) => {
-    const lm = frame.landmarks.map(l => ({ ...l }));
-
-    // Straighten trunk: shift upper body to align shoulders over hips
+    // Straighten trunk
     const midShX = (lm[11].x + lm[12].x) / 2;
     const midHipX = (lm[23].x + lm[24].x) / 2;
     const lean = midShX - midHipX;
     lm[11].x -= lean;
     lm[12].x -= lean;
 
-    // Place upper arm hanging straight down from shoulder (slight 5° forward lean for natural look)
-    const sh = lm[shIdx];
-    const fwdLean = 0.005; // tiny forward offset
-    lm[elIdx] = {
-      ...lm[elIdx],
-      x: sh.x + fwdLean,
-      y: sh.y + avgUpper,
-      z: (sh.z || 0),
-    };
+    const angle = idealAngleAtTime(t);
+    const angleRad = (angle * Math.PI) / 180;
 
-    // Rotate forearm around elbow at the ideal angle
-    const el = lm[elIdx];
-    const idealAngleRad = (smoothedAngles[fi] * Math.PI) / 180;
-    // Upper arm direction is (0, 1) in normalized coords (pointing down)
-    // Angle is measured from upper arm direction, rotating the forearm
-    const sign = activeSide === 'left' ? -1 : 1;
-    lm[wrIdx] = {
-      ...lm[wrIdx],
-      x: el.x + sign * Math.sin(idealAngleRad) * avgFore,
-      y: el.y + Math.cos(idealAngleRad) * avgFore,
-      z: (el.z || 0),
-    };
+    // Apply to BOTH arms symmetrically
+    for (const [shI, elI, wrI, sign] of [[11, 13, 15, -1], [12, 14, 16, 1]]) {
+      const sh = lm[shI];
+      // Upper arm hangs straight down
+      lm[elI] = { ...lm[elI], x: sh.x, y: sh.y + avgUpper, z: sh.z || 0 };
+      // Forearm at ideal angle
+      const el = lm[elI];
+      lm[wrI] = {
+        ...lm[wrI],
+        x: el.x + sign * Math.sin(angleRad) * avgFore,
+        y: el.y + Math.cos(angleRad) * avgFore,
+        z: el.z || 0,
+      };
+    }
 
-    return { ...frame, landmarks: lm };
-  });
+    idealFrames.push({ timestamp: t, landmarks: lm });
+  }
+
+  // Attach ideal rep metrics to the array so IdealTwinSection can use them
+  idealFrames._idealRepMetrics = idealRepMetrics;
+  return idealFrames;
 }
 
 // ─── Ideal Twin with independent playback ───
@@ -706,6 +701,8 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
   const idealLastTRef = useRef(null);
   const idealPausedAtRepRef = useRef(null);
 
+  // Use ideal-specific rep timings (attached by generateIdealLandmarks)
+  const idealRepMetrics = idealLandmarks._idealRepMetrics || repMetrics;
   const idealDuration = idealLandmarks[idealLandmarks.length - 1]?.timestamp || 1;
 
   // Playback loop
@@ -727,7 +724,7 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
         }
 
         // Check if we entered a new rep — auto-pause at rep start
-        const rep = repMetrics.find(r => next >= r.startTime && next <= r.endTime);
+        const rep = idealRepMetrics.find(r => next >= r.startTime && next <= r.endTime);
         if (rep && rep.repNumber !== idealPausedAtRepRef.current) {
           idealPausedAtRepRef.current = rep.repNumber;
           setIdealCurrentRep(rep);
@@ -744,7 +741,7 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
     };
     idealAnimRef.current = requestAnimationFrame(tick);
     return () => { if (idealAnimRef.current) cancelAnimationFrame(idealAnimRef.current); };
-  }, [idealPlaying, repMetrics, idealDuration]);
+  }, [idealPlaying, idealRepMetrics, idealDuration]);
 
   const startIdeal = () => {
     setIdealPlaying(true);
@@ -762,9 +759,9 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
       <MannequinViewer
         frameLandmarks={idealLandmarks}
         activeSide={activeSide}
-        repMetrics={repMetrics}
+        repMetrics={idealRepMetrics}
         currentTime={idealTime}
-        getRepScore={getRepScore}
+        getRepScore={() => 3}
         idealMode
       />
       <div className="bg-white rounded-2xl p-3 shadow-sm mt-2">
@@ -786,7 +783,7 @@ function IdealTwinSection({ idealLandmarks, activeSide, repMetrics, getRepScore 
         </div>
         <div className="flex items-center gap-1 mt-1.5">
           <span className="text-[9px] text-ink/30 mr-1">Reps:</span>
-          {repMetrics.map(rep => {
+          {idealRepMetrics.map(rep => {
             const isActive = idealCurrentRep?.repNumber === rep.repNumber;
             return (
               <button key={rep.repNumber}
