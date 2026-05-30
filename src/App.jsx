@@ -133,6 +133,32 @@ export default function App() {
           onBack={() => setView(results ? 'dashboard' : 'upload')}
         />
       )}
+
+      {/* Footer */}
+      <footer className="mt-12 pb-8 px-6 text-center text-xs text-ink/40 space-y-2">
+        <p>
+          Proyecto desarrollado en{' '}
+          <a href="https://platanus.build-night.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-ink/60">
+            Platanus Build Night #26 MX
+          </a>
+        </p>
+        <div className="flex items-center justify-center gap-3 flex-wrap">
+          <a href="https://github.com/platanus-build-night/platanus-build-night-26-mx-Ironsss"
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 underline hover:text-ink/60">
+            Repo original (hackathon)
+          </a>
+          <span className="text-ink/20">|</span>
+          <a href="https://github.com/Ironsss/easyfisio"
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 underline hover:text-ink/60">
+            Repo deploy (mirror)
+          </a>
+        </div>
+        <p className="text-ink/25 text-[10px]">
+          Deploy publicado en un repo espejo por falta de permisos de admin en la org del hackathon para habilitar GitHub Pages.
+        </p>
+      </footer>
     </div>
   );
 }
