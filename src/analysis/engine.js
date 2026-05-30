@@ -349,7 +349,7 @@ function analyzeSession(rawData) {
   const lastVels = allVelocities.slice(-n);
 
   const fatigueROM = mean(firstROMs) > 0
-    ? Math.round(((mean(firstROMs) - mean(lastROMs)) / mean(firstROMs)) * 1000) / 10
+    ? Math.max(0, Math.round(((mean(firstROMs) - mean(lastROMs)) / mean(firstROMs)) * 1000) / 10)
     : 0;
   const fatigueVel = mean(firstVels) > 0
     ? Math.round(((mean(firstVels) - mean(lastVels)) / mean(firstVels)) * 1000) / 10
@@ -478,9 +478,9 @@ function detectReps(angles, timestamps) {
 export function assessMetric(metric, value) {
   const assessments = {
     rom: [
-      { max: 80, label: 'Limitado', color: '#E94560', icon: '⚠️',
+      { max: 60, label: 'Limitado', color: '#E94560', icon: '⚠️',
         tip: 'Tu rango de movimiento es bajo. Intenta extender el brazo completamente antes de cada rep y flexionar hasta que la mano se acerque al hombro. Si hay dolor, reduce el peso y consulta a tu fisioterapeuta.' },
-      { max: 110, label: 'Moderado', color: '#F5A623', icon: '⚡',
+      { max: 90, label: 'Moderado', color: '#F5A623', icon: '⚡',
         tip: 'Buen progreso pero aún puedes mejorar. Enfócate en estirar completamente el brazo abajo y subir la mancuerna hasta el hombro. Un calentamiento previo con movilidad articular puede ayudar.' },
       { max: 140, label: 'Normal', color: '#16C79A', icon: '✓',
         tip: 'Rango de movimiento saludable. Mantén esta amplitud en cada repetición. Si buscas más desafío, incrementa el peso gradualmente manteniendo el mismo rango.' },
@@ -488,35 +488,35 @@ export function assessMetric(metric, value) {
         tip: 'Rango de movimiento completo y óptimo. Estás aprovechando toda la amplitud articular del codo. Sigue así.' },
     ],
     fatigueROM: [
-      { max: 10, label: 'Mínima', color: '#16C79A', icon: '✓',
+      { max: 15, label: 'Mínima', color: '#16C79A', icon: '✓',
         tip: 'Excelente resistencia muscular. El rango se mantiene estable durante todo el set. El peso es adecuado para tu nivel actual.' },
-      { max: 25, label: 'Moderada', color: '#F5A623', icon: '⚡',
+      { max: 30, label: 'Moderada', color: '#F5A623', icon: '⚡',
         tip: 'Fatiga normal para un set exigente. Si quieres mejorar, prueba reducir 1-2 reps o bajar un poco el peso. También ayuda descansar 90-120 segundos entre sets.' },
       { max: 999, label: 'Excesiva', color: '#E94560', icon: '⚠️',
         tip: 'Tu forma se deteriora mucho al final del set. Reduce el peso un 15-20% o haz menos repeticiones. Es mejor hacer 8 reps con buena forma que 12 con técnica pobre.' },
     ],
     cvROM: [
-      { max: 5, label: 'Alta consistencia', color: '#16C79A', icon: '★',
+      { max: 10, label: 'Alta consistencia', color: '#16C79A', icon: '★',
         tip: 'Movimiento muy consistente, señal de excelente control motor. Cada repetición es prácticamente idéntica. Dominas bien este ejercicio.' },
-      { max: 15, label: 'Normal', color: '#F5A623', icon: '✓',
+      { max: 20, label: 'Normal', color: '#F5A623', icon: '✓',
         tip: 'Variabilidad aceptable. Para mejorar la consistencia, usa un espejo o grábate de perfil. Concéntrate en hacer cada rep con la misma velocidad y amplitud.' },
       { max: 999, label: 'Inconsistente', color: '#E94560', icon: '⚠️',
         tip: 'Cada repetición es muy diferente. Esto suele indicar fatiga, peso excesivo, o un patrón de movimiento no consolidado. Reduce el peso y haz reps lentas y controladas enfocándote en la técnica.' },
     ],
     trunkLean: [
-      { max: 5, label: 'Ideal', color: '#16C79A', icon: '✓',
+      { max: 8, label: 'Ideal', color: '#16C79A', icon: '✓',
         tip: 'Postura excelente. Tu tronco se mantiene recto, lo que significa que el bíceps está haciendo todo el trabajo sin compensaciones.' },
-      { max: 10, label: 'Leve', color: '#F5A623', icon: '⚡',
+      { max: 15, label: 'Leve', color: '#F5A623', icon: '⚡',
         tip: 'Hay una ligera inclinación del tronco. Intenta pegar la espalda contra una pared o usar un banco con respaldo para eliminar la compensación. Activa el core antes de cada rep.' },
       { max: 999, label: 'Significativa', color: '#E94560', icon: '⚠️',
         tip: 'Estás usando el tronco para impulsar el peso, lo que reduce el trabajo del bíceps y puede lesionar la zona lumbar. Baja el peso significativamente y haz el ejercicio sentado con respaldo, o de pie con la espalda contra la pared.' },
     ],
     ceRatio: [
-      { max: 0.4, label: 'Exc. muy lento', color: '#F5A623', icon: '⚡',
+      { max: 0.3, label: 'Exc. muy lento', color: '#F5A623', icon: '⚡',
         tip: 'La fase excéntrica (bajar) es muy lenta respecto a la concéntrica (subir). Está bien para protocolos de rehabilitación de tendones, pero si buscas hipertrofia general, intenta un tempo 1:2 (1s subir, 2s bajar).' },
-      { max: 0.7, label: 'Ideal', color: '#16C79A', icon: '★',
+      { max: 0.8, label: 'Ideal', color: '#16C79A', icon: '★',
         tip: 'Tempo perfecto. Subes controlado y bajas más lento, maximizando el estímulo muscular. Este ratio es ideal tanto para rehabilitación como para fortalecimiento.' },
-      { max: 1.2, label: 'Aceptable', color: '#16C79A', icon: '✓',
+      { max: 1.5, label: 'Aceptable', color: '#16C79A', icon: '✓',
         tip: 'Buen control general. Para optimizar, intenta bajar el peso un poco más lento (cuenta "uno-dos" mientras bajas). La fase excéntrica es donde más se fortalece el músculo.' },
       { max: 999, label: 'Sin control exc.', color: '#E94560', icon: '⚠️',
         tip: 'Estás dejando caer el peso en lugar de bajarlo con control. Esto reduce la efectividad del ejercicio y aumenta el riesgo de lesión. Baja el peso un 20% y enfócate en bajar lento: cuenta 2-3 segundos mientras extiendes el brazo.' },

@@ -595,10 +595,10 @@ function QuickStat({ label, value, assessment }) {
 function OverviewTab({ summary, repMetrics }) {
   const radarData = [
     { metric: 'ROM', value: Math.min(100, (summary.meanROM / 140) * 100), fullMark: 100 },
-    { metric: 'Consistencia', value: Math.max(0, 100 - summary.cvROM * 5), fullMark: 100 },
-    { metric: 'Control Exc.', value: Math.min(100, Math.max(0, (1 - Math.abs(summary.meanCERatio - 0.5) * 2) * 100)), fullMark: 100 },
-    { metric: 'Resistencia', value: Math.max(0, 100 - summary.fatigueIndexROM * 3), fullMark: 100 },
-    { metric: 'Postura', value: Math.max(0, 100 - summary.meanTrunkCompensation * 8), fullMark: 100 },
+    { metric: 'Consistencia', value: Math.max(0, 100 - summary.cvROM * 3), fullMark: 100 },
+    { metric: 'Control Exc.', value: Math.min(100, Math.max(0, (1 - Math.abs(summary.meanCERatio - 0.55) * 1.5) * 100)), fullMark: 100 },
+    { metric: 'Resistencia', value: Math.max(0, 100 - summary.fatigueIndexROM * 2), fullMark: 100 },
+    { metric: 'Postura', value: Math.max(0, 100 - summary.meanTrunkCompensation * 5), fullMark: 100 },
     { metric: 'Hold', value: Math.min(100, summary.meanHoldTime * 100), fullMark: 100 },
   ];
 
@@ -626,7 +626,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle={`σ = ${summary.stdROM}°`}
           assessment={assessMetric('rom', summary.meanROM)}
           detail="Rango de movimiento promedio del codo en todas las repeticiones"
-          optimal={{ value: '120–140°', current: summary.meanROM, unit: '°', target: 130, max: 180 }}
+          optimal={{ value: '90–140°', current: summary.meanROM, unit: '°', target: 115, max: 180 }}
         />
         <MetricCard
           title="Ratio C:E"
@@ -634,7 +634,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle="concéntrico/excéntrico"
           assessment={assessMetric('ceRatio', summary.meanCERatio)}
           detail="Ideal ≈ 0.5 (1:2). Excéntrica debe durar el doble que concéntrica"
-          optimal={{ value: '0.4–0.7', current: summary.meanCERatio, unit: '', target: 0.55, max: 2 }}
+          optimal={{ value: '0.3–0.8', current: summary.meanCERatio, unit: '', target: 0.55, max: 2 }}
         />
         <MetricCard
           title="Índice Fatiga"
@@ -642,7 +642,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle="ROM: primeras vs últimas"
           assessment={assessMetric('fatigueROM', summary.fatigueIndexROM)}
           detail="Degradación del ROM entre primeras y últimas repeticiones"
-          optimal={{ value: '< 10%', current: summary.fatigueIndexROM, unit: '%', target: 5, max: 50, lower: true }}
+          optimal={{ value: '< 15%', current: summary.fatigueIndexROM, unit: '%', target: 8, max: 50, lower: true }}
         />
         <MetricCard
           title="Compensación"
@@ -650,7 +650,7 @@ function OverviewTab({ summary, repMetrics }) {
           subtitle={`media: ${summary.meanTrunkCompensation}°`}
           assessment={assessMetric('trunkLean', summary.maxTrunkCompensation)}
           detail="Inclinación del tronco. > 10° indica peso excesivo"
-          optimal={{ value: '< 5°', current: summary.maxTrunkCompensation, unit: '°', target: 3, max: 30, lower: true }}
+          optimal={{ value: '< 8°', current: summary.maxTrunkCompensation, unit: '°', target: 5, max: 30, lower: true }}
         />
         <MetricCard
           title="TUT Total"
@@ -813,21 +813,23 @@ function repInterpretation(rep, repMetrics) {
   }
 
   // Trunk
-  if (rep.maxTrunkLean > 10) {
+  if (rep.maxTrunkLean > 15) {
     findings.push({ type: 'warn', text: `Compensación del tronco de ${rep.maxTrunkLean}°. Estás usando impulso lumbar para subir el peso. Reduce la carga o apoya la espalda.` });
-  } else if (rep.maxTrunkLean > 5) {
+  } else if (rep.maxTrunkLean > 8) {
     findings.push({ type: 'caution', text: `Ligera inclinación del tronco (${rep.maxTrunkLean}°). Activa el core y mantén la espalda recta.` });
   } else {
     findings.push({ type: 'good', text: 'Postura estable. El bíceps está haciendo todo el trabajo.' });
   }
 
   // Tempo
-  if (rep.ceRatio > 1.2) {
+  if (rep.ceRatio > 1.5) {
     findings.push({ type: 'warn', text: `Fase excéntrica demasiado rápida (ratio ${rep.ceRatio}). Estás dejando caer el peso. Baja en 2-3 segundos controlados.` });
-  } else if (rep.ceRatio < 0.4) {
+  } else if (rep.ceRatio < 0.3) {
     findings.push({ type: 'caution', text: `Excéntrica muy lenta (ratio ${rep.ceRatio}). Bien para rehab de tendones, pero si buscas hipertrofia apunta a un ratio ~0.5.` });
-  } else if (rep.ceRatio >= 0.4 && rep.ceRatio <= 0.7) {
+  } else if (rep.ceRatio >= 0.3 && rep.ceRatio <= 0.8) {
     findings.push({ type: 'good', text: `Tempo ideal (${rep.tConcentric}s subiendo, ${rep.tEccentric}s bajando). Buen control concéntrico-excéntrico.` });
+  } else {
+    findings.push({ type: 'good', text: `Buen control del tempo (${rep.tConcentric}s subiendo, ${rep.tEccentric}s bajando).` });
   }
 
   // TUT
@@ -1054,9 +1056,9 @@ const METRICS_INFO = [
       '\\text{ROM}_{\\text{rep}} = \\theta_{\\max} - \\theta_{\\min}',
     ],
     ranges: [
-      { label: 'Limitado', value: '< 80°', color: '#E94560' },
-      { label: 'Moderado', value: '80–110°', color: '#F5A623' },
-      { label: 'Normal', value: '110–140°', color: '#16C79A' },
+      { label: 'Limitado', value: '< 60°', color: '#E94560' },
+      { label: 'Moderado', value: '60–90°', color: '#F5A623' },
+      { label: 'Normal', value: '90–140°', color: '#16C79A' },
       { label: 'Excelente', value: '> 140°', color: '#16C79A' },
     ],
     reference: 'Norkin & White, Measurement of Joint Motion: A Guide to Goniometry, 6th Ed.',
@@ -1100,10 +1102,10 @@ const METRICS_INFO = [
       '\\text{Ideal} \\approx 0.5 \\quad (\\text{ej. } 1\\text{s subir}, \\; 2\\text{s bajar})',
     ],
     ranges: [
-      { label: 'Exc. muy lento', value: '< 0.4', color: '#F5A623' },
-      { label: 'Ideal', value: '0.4–0.7', color: '#16C79A' },
-      { label: 'Aceptable', value: '0.7–1.2', color: '#16C79A' },
-      { label: 'Sin control exc.', value: '> 1.2', color: '#E94560' },
+      { label: 'Exc. muy lento', value: '< 0.3', color: '#F5A623' },
+      { label: 'Ideal', value: '0.3–0.8', color: '#16C79A' },
+      { label: 'Aceptable', value: '0.8–1.5', color: '#16C79A' },
+      { label: 'Sin control exc.', value: '> 1.5', color: '#E94560' },
     ],
     reference: 'Alfredson H. et al. (1998), Heavy-load eccentric calf muscle training, Am J Sports Med.',
   },
@@ -1115,9 +1117,9 @@ const METRICS_INFO = [
       '\\text{FI}_{\\text{ROM}} = \\frac{\\overline{\\text{ROM}}_{\\text{1\\text{-}3}} - \\overline{\\text{ROM}}_{\\text{últ. 3}}}{\\overline{\\text{ROM}}_{\\text{1\\text{-}3}}} \\times 100\\%',
     ],
     ranges: [
-      { label: 'Mínima', value: '< 10%', color: '#16C79A' },
-      { label: 'Moderada', value: '10–25%', color: '#F5A623' },
-      { label: 'Excesiva', value: '> 25%', color: '#E94560' },
+      { label: 'Mínima', value: '< 15%', color: '#16C79A' },
+      { label: 'Moderada', value: '15–30%', color: '#F5A623' },
+      { label: 'Excesiva', value: '> 30%', color: '#E94560' },
     ],
     reference: 'Enoka & Duchateau (2008), Muscle fatigue: what, why and how it influences muscle function, J Physiol.',
   },
@@ -1130,9 +1132,9 @@ const METRICS_INFO = [
       '\\text{Compensación} = |\\theta_{\\text{tronco}}| \\quad [°]',
     ],
     ranges: [
-      { label: 'Ideal', value: '< 5°', color: '#16C79A' },
-      { label: 'Leve', value: '5–10°', color: '#F5A623' },
-      { label: 'Significativa', value: '> 10°', color: '#E94560' },
+      { label: 'Ideal', value: '< 8°', color: '#16C79A' },
+      { label: 'Leve', value: '8–15°', color: '#F5A623' },
+      { label: 'Significativa', value: '> 15°', color: '#E94560' },
     ],
     reference: 'Sahrmann, S., Movement System Impairment Syndromes of the Extremities.',
   },
@@ -1145,9 +1147,9 @@ const METRICS_INFO = [
       '\\sigma = \\sqrt{\\frac{1}{n-1}\\sum_{i=1}^{n}(\\text{ROM}_i - \\mu)^2}',
     ],
     ranges: [
-      { label: 'Alta consistencia', value: '< 5%', color: '#16C79A' },
-      { label: 'Normal', value: '5–15%', color: '#F5A623' },
-      { label: 'Inconsistente', value: '> 15%', color: '#E94560' },
+      { label: 'Alta consistencia', value: '< 10%', color: '#16C79A' },
+      { label: 'Normal', value: '10–20%', color: '#F5A623' },
+      { label: 'Inconsistente', value: '> 20%', color: '#E94560' },
     ],
     reference: 'Stergiou & Decker (2011), Human Movement Variability, Nonlinear Dynamics, and Pathology.',
   },
