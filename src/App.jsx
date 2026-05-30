@@ -559,7 +559,7 @@ function drawBodyOverlay(ctx, lm, videoFit, score) {
   ctx.globalAlpha = 1.0;
 }
 
-function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalReps, duration }) {
+function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalReps, duration, getRepScore }) {
   const feedbackRef = useRef(null);
   const feedbackCanvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -569,6 +569,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
   const lastPausedRepRef = useRef(null);
   const [autoMode, setAutoMode] = useState(true);
   const [barWidths, setBarWidths] = useState({ left: 0, right: 0 });
+  const [videoTime, setVideoTime] = useState(0);
 
   const playVideo = useCallback(() => {
     feedbackRef.current?.play();
@@ -633,6 +634,7 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
 
       drawSkeletonOnCanvas(ctx, closest.landmarks, canvas.width, canvas.height, activeSide, videoFit);
 
+      setVideoTime(t);
       animRef.current = requestAnimationFrame(draw);
     };
 
@@ -827,6 +829,23 @@ function FeedbackView({ videoURL, frameLandmarks, activeSide, repMetrics, totalR
           </div>
         </div>
       )}
+
+      {/* Digital Twin 3D — below video */}
+      {frameLandmarks?.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-3 mb-3">
+            <h3 className="font-display text-lg font-bold text-ink">Digital Twin 3D</h3>
+            <span className="text-xs text-ink/30">Arrastra para rotar • Scroll para zoom</span>
+          </div>
+          <MannequinViewer
+            frameLandmarks={frameLandmarks}
+            activeSide={activeSide}
+            repMetrics={repMetrics}
+            currentTime={videoTime}
+            getRepScore={getRepScore}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -857,7 +876,6 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
   const tabs = [
     { id: 'overview', label: 'Resumen' },
     { id: 'feedback', label: 'Feedback' },
-    { id: 'twin', label: 'Digital Twin' },
     { id: 'reps', label: 'Por Rep' },
     { id: 'timeseries', label: 'Gráficas' },
     { id: 'methodology', label: 'Metodología' },
@@ -938,30 +956,12 @@ function DashboardView({ results, videoURL, onNewAnalysis }) {
           repMetrics={repMetrics}
           totalReps={totalReps}
           duration={duration}
+          getRepScore={getRepScore}
         />
       )}
 
-      {/* Digital Twin tab: full-width */}
-      {activeTab === 'twin' && frameLandmarks?.length > 0 && (
-        <div>
-          <div className="bg-white rounded-3xl p-6 shadow-sm mb-4">
-            <h3 className="font-display text-xl font-bold mb-1">Digital Twin 3D</h3>
-            <p className="text-sm text-ink/40">
-              Maniquí 3D sincronizado con el análisis. El brazo {activeSide === 'left' ? 'izquierdo' : 'derecho'} se colorea
-              según la calidad de cada repetición. Arrastra para rotar, scroll para zoom.
-            </p>
-          </div>
-          <MannequinViewer
-            frameLandmarks={frameLandmarks}
-            activeSide={activeSide}
-            repMetrics={repMetrics}
-            getRepScore={getRepScore}
-          />
-        </div>
-      )}
-
       {/* Other tabs: two-column layout with sidebar */}
-      {activeTab !== 'feedback' && activeTab !== 'twin' && (
+      {activeTab !== 'feedback' && (
         <div className="flex gap-8 items-start">
           <div className="flex-1 min-w-0">
             {activeTab === 'overview' && <OverviewTab summary={summary} repMetrics={repMetrics} />}
